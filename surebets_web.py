@@ -19,8 +19,9 @@ Esta aplicación detecta oportunidades de **surebets (arbitraje deportivo)** en 
 """)
 
 # --- Lista de API Keys ---
-# NOTA: En un entorno de producción, considera cargar estas claves desde variables de entorno
-# o un archivo de secretos para mayor seguridad.
+# NOTA IMPORTANTE: En un entorno de producción o si compartes este código públicamente,
+# considera cargar estas claves desde variables de entorno o un archivo de secretos
+# (.streamlit/secrets.toml) para mayor seguridad y evitar exponerlas.
 API_KEYS = [
     "734f30d0866696cf90d5029ac106cfba", "10fb6d9d7b3240906d0acea646068535",
     "a9ff72549c4910f1fa9659e175a35cc0", "25e9d8872877f5110254ff6ef42056c6",
@@ -50,11 +51,13 @@ API_KEYS = [
 ]
 
 # --- Diccionario de Deportes ---
+# ¡ACTUALIZADO! Se asume 'baseball_mlb' como la clave correcta para Béisbol.
+# Si el error persiste, usa el script 'check_sports.py' para verificar la clave exacta.
 SPORTS = {
     "Fútbol": "soccer",
     "Baloncesto": "basketball",
     "Tenis": "tennis",
-    "Béisbol": "baseball",
+    "Béisbol": "baseball_mlb", # POSIBLE CORRECCIÓN: De 'baseball' a 'baseball_mlb'
 }
 
 # --- Lógica de Rotación de API Keys y Gestión de Créditos ---
@@ -79,10 +82,11 @@ def get_next_available_api_key_info():
         current_key_index = st.session_state.api_key_index
         current_key = API_KEYS[current_key_index]
         
-        if st.session_state.api_key_status.get(current_key, True): # Si la clave está activa
+        # Si la clave actual está activa, la usamos
+        if st.session_state.api_key_status.get(current_key, True):
             return current_key, current_key_index
         
-        # Si la clave actual no está activa, pasar a la siguiente
+        # Si la clave actual no está activa, pasar a la siguiente y continuar el bucle
         st.session_state.api_key_index = (current_key_index + 1) % num_keys
         
         # Si hemos dado la vuelta completa y ninguna está activa, salimos
@@ -127,6 +131,11 @@ def find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx):
             st.error(f"⚠️ **Error: La API Key #{api_key_idx} (últimos 4 digitos: {api_key[-4:]}) ha agotado sus créditos.** Por favor, reemplázala.")
             return [] # No procesar datos si la clave está agotada
         
+        # Verificar si es un error 404 (Not Found) específicamente
+        if response.status_code == 404:
+            st.error(f"⚠️ **Error 404 para {sport_name}**: La URL solicitada no se encontró. Esto podría indicar una 'sport_key' incorrecta o que no hay datos disponibles para este deporte/liga en este momento. URL: {response.url}")
+            return [] # No procesar datos si el recurso no se encontró
+
         response.raise_for_status() # Lanza una excepción para otros códigos de error HTTP
         data = response.json()
         
@@ -182,7 +191,7 @@ def find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx):
         return surebets_found
 
     except requests.exceptions.RequestException as e:
-        # Aquí se capturan otros errores de conexión o HTTP que no son 401/402
+        # Otros errores de conexión o HTTP que no son 401/402/404
         st.error(f"Error de conexión o API para {sport_name}: {e}")
         return []
     except Exception as e:
@@ -228,11 +237,13 @@ if st.sidebar.button("🚀 Iniciar Búsqueda Global de Surebets"):
                 all_surebets.extend(sport_surebets)
             
             progress_bar.progress((i + 1) / total_sports)
-            time.sleep(1) # Pausa para evitar exceder límites de API
+            # Pequeña pausa para evitar exceder límites de API rápidamente y dar tiempo a Streamlit
+            time.sleep(1) 
 
-        if api_key is not None: # Solo si la búsqueda no se detuvo por falta de API keys
+        # Mensaje final de búsqueda completada
+        if api_key is not None:
             status_text.success("¡Búsqueda global completada!")
-        progress_bar.empty()
+        progress_bar.empty() # Ocultar barra de progreso
 
         with results_placeholder.container():
             if not all_surebets:
@@ -273,7 +284,7 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("Claves API Agotadas")
 if st.session_state.depleted_api_keys:
     for depleted_key in st.session_state.depleted_api_keys:
-        st.sidebar.error(f"❌ Agotada: {depleted_key} (necesita ser reemplazada)")
+        st.sidebar.error(f"❌ Agotada: {depleted_key} (últimos 4 digitos: {depleted_key[-4:]}) - Reemplazar")
 else:
     st.sidebar.success("✅ Todas las API Keys están activas (o no se han detectado agotadas aún).")
 st.sidebar.markdown("---")
