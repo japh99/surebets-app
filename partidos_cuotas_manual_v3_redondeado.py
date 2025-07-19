@@ -1,45 +1,11 @@
-# partidos_cuotas_manual_v3.py
-# Evaluador de surebets manual con hasta 6 casas y tabla de sugerencias ampliada
+# partidos_cuotas_manual_simple.py
+# Evaluador de surebets simplificado sin tabla de sugerencias
 
 import streamlit as st
-import pandas as pd
 
-# -----------------------------
-# CONFIGURACIÓN
-# -----------------------------
-st.set_page_config(page_title="Evaluador de Surebets Manual v3", layout="centered")
-st.title("📊 Evaluador Manual de Cuotas para Surebets (hasta 6 casas)")
+st.set_page_config(page_title="Calculadora de Surebets", layout="centered")
+st.title("📊 Calculadora Manual de Surebets (hasta 6 casas)")
 
-st.subheader("📘 Cuotas sugeridas y ROI estimado para grandes ganancias")
-
-# Supongamos presupuesto de 100,000 COP
-presupuesto_cop = 100000
-datos = []
-cuotas_a = [1.20, 1.25, 1.30, 1.40, 1.50, 1.60, 1.70]
-for cuota_a in cuotas_a:
-    inv_a = 1 / cuota_a
-    for cuota_b in [x / 100 for x in range(300, 1001, 25)]:
-        inv_b = 1 / cuota_b
-        total = inv_a + inv_b
-        if total < 1:
-            roi = round((1 - total) * 100, 2)
-            stake_a = (inv_a / total) * presupuesto_cop
-            stake_b = (inv_b / total) * presupuesto_cop
-            ganancia = round(min(stake_a * cuota_a, stake_b * cuota_b) - presupuesto_cop, 2)
-            if ganancia >= 40000:
-                datos.append({
-                    "Cuota A": cuota_a,
-                    "Cuota B": round(cuota_b, 2),
-                    "ROI (%)": roi,
-                    "Ganancia (COP)": ganancia
-                })
-
-tabla_sugerencias = pd.DataFrame(datos).sort_values(by="Ganancia (COP)", ascending=False).head(20)
-st.dataframe(tabla_sugerencias)
-
-# -----------------------------
-# INGRESO DE DATOS MANUAL
-# -----------------------------
 st.subheader("📝 Ingresar evento y cuotas de hasta 6 casas")
 
 evento = st.text_input("Nombre del evento", value="Ej: Nacional vs Millonarios")
@@ -58,55 +24,54 @@ for i in range(6):
         cuota_visitante = st.number_input(f"Cuota Visitante", min_value=1.0, value=1.0, step=0.01, key=f"visitante_{i}")
     casas.append((nombre, cuota_local, cuota_visitante))
 
-# -----------------------------
-# CÁLCULO AUTOMÁTICO DE LA MEJOR COMBINACIÓN
-# -----------------------------
 if st.button("🔍 Evaluar combinaciones"):
     mejores = []
     for i in range(len(casas)):
         for j in range(len(casas)):
             if i == j:
                 continue
-            nombre1, cuota1_local, cuota1_visitante = casas[i]
-            nombre2, cuota2_local, cuota2_visitante = casas[j]
+            nombre1, c1_local, c1_visit = casas[i]
+            nombre2, c2_local, c2_visit = casas[j]
 
-            if cuota1_local > 1 and cuota2_visitante > 1:
-                inv1 = 1 / cuota1_local
-                inv2 = 1 / cuota2_visitante
+            # 1) Local / Visitante
+            if c1_local > 1 and c2_visit > 1:
+                inv1 = 1 / c1_local
+                inv2 = 1 / c2_visit
                 total_inv = inv1 + inv2
                 if total_inv < 1:
                     stake1 = round((inv1 / total_inv) * presupuesto)
                     stake2 = round((inv2 / total_inv) * presupuesto)
-                    ganancia = round(min(stake1 * cuota1_local, stake2 * cuota2_visitante) - presupuesto, 2)
+                    ganancia = round(min(stake1 * c1_local, stake2 * c2_visit) - presupuesto)
                     roi = round((1 - total_inv) * 100, 2)
                     mejores.append({
                         "tipo": "Local / Visitante",
                         "casa1": nombre1,
-                        "cuota1": cuota1_local,
+                        "cuota1": c1_local,
                         "stake1": stake1,
                         "casa2": nombre2,
-                        "cuota2": cuota2_visitante,
+                        "cuota2": c2_visit,
                         "stake2": stake2,
                         "ganancia": ganancia,
                         "roi": roi
                     })
 
-            if cuota2_local > 1 and cuota1_visitante > 1:
-                inv1 = 1 / cuota2_local
-                inv2 = 1 / cuota1_visitante
+            # 2) Visitante / Local
+            if c2_local > 1 and c1_visit > 1:
+                inv1 = 1 / c2_local
+                inv2 = 1 / c1_visit
                 total_inv = inv1 + inv2
                 if total_inv < 1:
                     stake1 = round((inv1 / total_inv) * presupuesto)
                     stake2 = round((inv2 / total_inv) * presupuesto)
-                    ganancia = round(min(stake1 * cuota2_local, stake2 * cuota1_visitante) - presupuesto, 2)
+                    ganancia = round(min(stake1 * c2_local, stake2 * c1_visit) - presupuesto)
                     roi = round((1 - total_inv) * 100, 2)
                     mejores.append({
                         "tipo": "Visitante / Local",
                         "casa1": nombre2,
-                        "cuota1": cuota2_local,
+                        "cuota1": c2_local,
                         "stake1": stake1,
                         "casa2": nombre1,
-                        "cuota2": cuota1_visitante,
+                        "cuota2": c1_visit,
                         "stake2": stake2,
                         "ganancia": ganancia,
                         "roi": roi
@@ -114,16 +79,16 @@ if st.button("🔍 Evaluar combinaciones"):
 
     if mejores:
         top = sorted(mejores, key=lambda x: x["ganancia"], reverse=True)[0]
-        st.success("✅ ¡Se encontró una surebet rentable!")
+        st.success("✅ ¡Surebet encontrada!")
         st.markdown(f"""
 **🎯 Evento:** {evento}
 
-🏦 Apostar en:
-- **{top['casa1']}**: {top['stake1']} {moneda} a cuota {top['cuota1']}
-- **{top['casa2']}**: {top['stake2']} {moneda} a cuota {top['cuota2']}
+🏦 Apuesta recomendada:
+- **{top['casa1']}**: **${top['stake1']:,} {moneda}** a cuota {top['cuota1']}
+- **{top['casa2']}**: **${top['stake2']:,} {moneda}** a cuota {top['cuota2']}
 
-📈 ROI estimado: **{top['roi']}%**  
-💰 Ganancia garantizada: **{top['ganancia']} {moneda}**
+📈 ROI: **{top['roi']}%**  
+💰 Ganancia asegurada: **${top['ganancia']:,} {moneda}**
 """)
     else:
-        st.warning("❌ No se encontraron combinaciones rentables con las cuotas ingresadas.")
+        st.warning("❌ No se encontraron combinaciones rentables.")
