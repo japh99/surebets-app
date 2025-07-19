@@ -1,5 +1,3 @@
-# surebets_streamlit_app.py
-
 import streamlit as st
 import pandas as pd
 import requests
@@ -8,20 +6,21 @@ import time
 
 # --- Configuración de la Página y Título ---
 st.set_page_config(
-    page_title="Buscador de Surebets",
-    page_icon="🧠",
+    page_title="Buscador de Surebets Global",
+    page_icon="🌍",
     layout="wide"
 )
 
-st.title("🧠 Buscador de Surebets Deportivo")
+st.title("🌍 Buscador de Surebets Global")
 st.markdown("""
-Esta aplicación detecta oportunidades de **surebets (arbitraje deportivo)** en tiempo real.
-Utiliza datos de **The Odds API** para el mercado *Head-to-Head (H2H)* y rota entre 50 claves API para optimizar el uso de créditos.
-- **Deportes Analizados:** Fútbol, Baloncesto, Tenis y Béisbol.
-- **Filtros:** Muestra solo surebets con utilidad positiva y diferencia entre eventos en vivo y pre-partido.
+Esta aplicación detecta oportunidades de **surebets (arbitraje deportivo)** en tiempo real a través de **todas las ligas del mundo** para los deportes seleccionados.
+- **Instrucciones:** Selecciona uno o más deportes en el panel de la izquierda. La aplicación escaneará todas las ligas activas para esos deportes.
+- **API:** Rota automáticamente entre 50 claves de The Odds API para maximizar el uso de créditos.
 """)
 
-# --- Lista de API Keys y Variables Globales ---
+# --- Lista de API Keys ---
+# NOTA: En un entorno de producción, considera cargar estas claves desde variables de entorno
+# o un archivo de secretos para mayor seguridad.
 API_KEYS = [
     "734f30d0866696cf90d5029ac106cfba", "10fb6d9d7b3240906d0acea646068535",
     "a9ff72549c4910f1fa9659e175a35cc0", "25e9d8872877f5110254ff6ef42056c6",
@@ -50,12 +49,14 @@ API_KEYS = [
     "6f74a75a76f42fabaa815c4461c59980", "86de2f86b0b628024ef6d5546b479c0f"
 ]
 
-# Diccionario de deportes para la API
+# --- Diccionario de Deportes ---
+# Ahora solo incluye Fútbol, Baloncesto, Tenis y Béisbol.
+# La API buscará TODAS las ligas disponibles para estos deportes.
 SPORTS = {
-    "Fútbol": "soccer_usa_mls", # Ejemplo, puedes agregar más ligas
-    "Baloncesto": "basketball_nba",
-    "Béisbol": "baseball_mlb",
-    "Tenis": "tennis_atp_french_open" # Cambiar según el Grand Slam actual
+    "Fútbol": "soccer",
+    "Baloncesto": "basketball",
+    "Tenis": "tennis",
+    "Béisbol": "baseball",
 }
 
 # --- Lógica de Rotación de API Keys ---
@@ -80,43 +81,44 @@ def get_event_status(commence_time_str):
     elif commence_time < now_utc + timedelta(hours=48):
         return "🟢 Pre-Partido"
     else:
-        # Si el evento es más allá de 48 horas, no lo consideramos.
         return None
 
-def find_surebets_for_sport(sport_key, sport_name, api_key):
-    """Busca surebets para un deporte específico usando una API key."""
+def find_surebets_for_sport(sport_name, sport_key, api_key):
+    """Busca surebets para TODAS las ligas de un deporte específico."""
     surebets_found = []
+    # Usamos el endpoint del deporte, que devuelve todas las ligas activas para ese deporte.
     url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds"
     
     params = {
         "apiKey": api_key,
-        "regions": "us,eu,uk", # Ampliamos regiones para más casas de apuestas
+        "regions": "us,eu,uk,au", # Ampliamos regiones para más casas de apuestas
         "markets": "h2h",
         "oddsFormat": "decimal"
     }
     
     try:
-        response = requests.get(url, params=params, timeout=15)
-        response.raise_for_status() # Lanza un error si la petición falla
+        response = requests.get(url, params=params, timeout=30) # Aumentamos el timeout
+        response.raise_for_status()
         data = response.json()
         
         remaining_requests = response.headers.get('x-requests-remaining', 'N/A')
-        st.sidebar.info(f"Consumiendo API Key #{st.session_state.api_key_index}. Créditos restantes: {remaining_requests}")
+        used_requests = response.headers.get('x-requests-used', 'N/A')
+        st.sidebar.info(f"API Key #{st.session_state.api_key_index} | Usados: {used_requests} | Restantes: {remaining_requests}")
 
         for event in data:
             status = get_event_status(event['commence_time'])
-            if not status:
-                continue # Ignora eventos que no son en vivo ni en las próximas 48h
+            if not status: # Solo consideramos eventos en vivo o pre-partido (dentro de 48h)
+                continue
 
             home_team = event['home_team']
             away_team = event['away_team']
             
             best_odds = {home_team: {'price': 0, 'bookmaker': ''}, away_team: {'price': 0, 'bookmaker': ''}}
 
-            # Filtrar solo eventos con al menos 2 casas de apuestas
-            if len(event['bookmakers']) < 2:
+            if len(event['bookmakers']) < 2: # Necesitamos al menos dos casas para una surebet
                 continue
 
+            # Buscar las mejores cuotas para cada equipo
             for bookmaker in event['bookmakers']:
                 for market in bookmaker['markets']:
                     if market['key'] == 'h2h':
@@ -134,9 +136,10 @@ def find_surebets_for_sport(sport_key, sport_name, api_key):
                 # Fórmula de utilidad
                 utilidad = (1 - (1/odds1 + 1/odds2)) * 100
                 
-                if utilidad > 0:
+                if utilidad > 0: # Solo mostramos surebets reales con utilidad positiva
                     surebets_found.append({
                         "Deporte": sport_name,
+                        "Liga/Torneo": event['sport_title'], # sport_title representa la liga/torneo
                         "Estado": status,
                         "Evento": f"{home_team} vs {away_team}",
                         "Fecha (UTC)": datetime.fromisoformat(event['commence_time'].replace('Z', '')).strftime('%Y-%m-%d %H:%M'),
@@ -161,68 +164,68 @@ def find_surebets_for_sport(sport_key, sport_name, api_key):
 # --- Interfaz de Usuario ---
 st.sidebar.header("Panel de Control")
 
-if st.sidebar.button("🚀 Iniciar Búsqueda de Surebets"):
-    # Placeholder para los resultados
-    results_placeholder = st.empty()
-    
-    # Barra de progreso y estado
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    all_surebets = []
-    total_sports = len(SPORTS)
+# Establecemos los deportes por defecto a los que solicitaste
+selected_sports = st.sidebar.multiselect(
+    "Selecciona los deportes a escanear:",
+    options=list(SPORTS.keys()),
+    default=["Fútbol", "Baloncesto", "Tenis", "Béisbol"] 
+)
 
-    for i, (sport_name, sport_key) in enumerate(SPORTS.items()):
-        status_text.text(f"Buscando en: {sport_name}...")
+if st.sidebar.button("🚀 Iniciar Búsqueda Global de Surebets"):
+    if not selected_sports:
+        st.warning("Por favor, selecciona al menos un deporte para buscar.")
+    else:
+        results_placeholder = st.empty()
+        progress_bar = st.progress(0)
+        status_text = st.empty()
         
-        # Obtiene una nueva API key para cada deporte
-        api_key = get_next_api_key()
-        
-        # Realiza la búsqueda
-        sport_surebets = find_surebets_for_sport(sport_key, sport_name, api_key)
-        
-        if sport_surebets:
-            all_surebets.extend(sport_surebets)
-        
-        # Actualiza la barra de progreso
-        progress_bar.progress((i + 1) / total_sports)
-        time.sleep(1) # Pequeña pausa para no saturar la API
+        all_surebets = []
+        total_sports = len(selected_sports)
 
-    status_text.success("¡Búsqueda completada!")
-    progress_bar.empty()
-
-    # --- Visualización de Resultados ---
-    with results_placeholder.container():
-        if not all_surebets:
-            st.warning("No se encontraron surebets en esta búsqueda.")
-        else:
-            st.success(f"¡Se encontraron {len(all_surebets)} oportunidades de surebet!")
+        for i, sport_name in enumerate(selected_sports):
+            sport_key = SPORTS[sport_name]
+            status_text.text(f"Buscando en: {sport_name} (todas las ligas)...")
             
-            df = pd.DataFrame(all_surebets)
+            api_key = get_next_api_key()
+            sport_surebets = find_surebets_for_sport(sport_name, sport_key, api_key)
             
-            # Reordenar columnas para mejor visualización
-            column_order = [
-                "Deporte", "Estado", "Evento", "Fecha (UTC)", 
-                "Utilidad (%)", "Equipo 1", "Mejor Cuota 1", "Casa de Apuestas 1",
-                "Equipo 2", "Mejor Cuota 2", "Casa de Apuestas 2"
-            ]
-            df = df[column_order]
+            if sport_surebets:
+                all_surebets.extend(sport_surebets)
+            
+            progress_bar.progress((i + 1) / total_sports)
+            time.sleep(1) # Pausa para evitar exceder límites de API
 
-            # Agrupar por deporte para una visualización ordenada
-            for sport in df['Deporte'].unique():
-                with st.expander(f"Surebets para {sport}", expanded=True):
-                    sport_df = df[df['Deporte'] == sport].drop(columns=['Deporte'])
-                    
-                    # Estilizar el DataFrame
-                    st.dataframe(sport_df.style.apply(
-                        lambda x: ['background-color: #28a745' if col == 'Utilidad (%)' else '' for col in x.index],
-                        axis=1
-                    ), use_container_width=True)
+        status_text.success("¡Búsqueda global completada!")
+        progress_bar.empty()
+
+        with results_placeholder.container():
+            if not all_surebets:
+                st.warning("No se encontraron surebets en los deportes seleccionados.")
+            else:
+                st.success(f"¡Se encontraron {len(all_surebets)} oportunidades de surebet a nivel mundial!")
+                
+                df = pd.DataFrame(all_surebets)
+                
+                column_order = [
+                    "Deporte", "Liga/Torneo", "Estado", "Evento", "Fecha (UTC)", 
+                    "Utilidad (%)", "Equipo 1", "Mejor Cuota 1", "Casa de Apuestas 1",
+                    "Equipo 2", "Mejor Cuota 2", "Casa de Apuestas 2"
+                ]
+                df = df[column_order]
+
+                for sport in df['Deporte'].unique():
+                    with st.expander(f"Surebets para {sport}", expanded=True):
+                        sport_df = df[df['Deporte'] == sport].drop(columns=['Deporte'])
+                        
+                        st.dataframe(sport_df.style.apply(
+                            lambda x: ['background-color: #28a745' if col == 'Utilidad (%)' else '' for col in x.index],
+                            axis=1
+                        ), use_container_width=True)
 
 st.sidebar.markdown("---")
 st.sidebar.header("Información de API")
 st.sidebar.write(f"Total de API Keys disponibles: {len(API_KEYS)}")
-st.sidebar.info(f"Próxima API Key a usar: #{ (st.session_state.api_key_index + 1) % len(API_KEYS) }")
+# Aseguramos que el índice mostrado no exceda el número de claves disponibles
+st.sidebar.info(f"Próxima API Key a usar: #{ (st.session_state.api_key_index) % len(API_KEYS) }")
 st.sidebar.markdown("---")
 st.sidebar.markdown("Autor: **JAPH99** 🇨🇴")
-
