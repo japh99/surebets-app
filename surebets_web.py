@@ -90,4 +90,3 @@ for key, used in st.session_state.api_usage.items():
     st.text(f"API {key[:6]}...: {used}/500 créditos usados")
     st.progress(min(used / 500, 1.0))
 
-
