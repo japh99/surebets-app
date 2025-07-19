@@ -1,10 +1,14 @@
 import streamlit as st
 import requests
+import pandas as pd
 from datetime import datetime, timedelta
+import random
 import time
 
-# Lista de 50 APIs
-APIS = [
+st.set_page_config(page_title="Buscador de Surebets por Deporte", layout="wide")
+
+# Lista de 50 APIs que rotan automáticamente
+API_KEYS = [
     "734f30d0866696cf90d5029ac106cfba",
     "10fb6d9d7b3240906d0acea646068535",
     "a9ff72549c4910f1fa9659e175a35cc0",
@@ -54,53 +58,68 @@ APIS = [
     "f3ff0fb5d7a7a683f88b8adec904e7b8",
     "1e0ab1ff51d111c88aebe4723020946a",
     "6f74a75a76f42fabaa815c4461c59980",
-    "86de2f86b0b628024ef6d5546b479c0f"
+    "86de2f86b0b628024ef6d5546b479c0f",
 ]
 
-st.set_page_config(page_title="Buscador de Surebets por Deporte", layout="centered")
-st.title("🎯 Buscador de Surebets por Deporte")
+SPORTS = {
+    "soccer": "Fútbol",
+    "basketball": "Baloncesto",
+    "tennis": "Tenis",
+    "baseball": "Béisbol"
+}
 
-if st.button("🔍 Buscar Surebets"):
-    st.info("Buscando...")
-    resultados = {"soccer": [], "basketball": [], "tennis": [], "baseball": []}
-    creditos_restantes = {}
+def fetch_odds(api_key, sport_key):
+    url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={api_key}&regions=us&markets=h2h&oddsFormat=decimal"
+    try:
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return []
+    except:
+        return []
 
-    for api_key in APIS:
-        try:
-            url = f"https://api.the-odds-api.com/v4/sports/odds/?regions=us&markets=h2h,totals,spreads&apiKey={api_key}"
-            response = requests.get(url)
-            creditos_restantes[api_key] = int(response.headers.get("x-requests-remaining", 0))
-            if response.status_code != 200:
-                continue
-
-            data = response.json()
+def buscar_surebets():
+    resultados = {nombre: [] for nombre in SPORTS.values()}
+    for sport_key, sport_name in SPORTS.items():
+        for api_key in API_KEYS:
+            data = fetch_odds(api_key, sport_key)
             for event in data:
-                if "teams" not in event or "bookmakers" not in event:
+                try:
+                    teams = event.get("teams", ["Equipo A", "Equipo B"])
+                    sites = event.get("bookmakers", [])
+                    if len(sites) < 2:
+                        continue
+                    mejores_cuotas = sorted(
+                        [site["markets"][0]["outcomes"] for site in sites if site["markets"]],
+                        key=lambda x: -1 * min([out["price"] for out in x])
+                    )
+                    if len(mejores_cuotas) >= 2:
+                        cuota1 = mejores_cuotas[0][0]["price"]
+                        cuota2 = mejores_cuotas[1][1]["price"]
+                        prob_total = (1 / cuota1) + (1 / cuota2)
+                        if prob_total < 1:
+                            utilidad = round((1 - prob_total) * 100, 2)
+                            resultados[sport_name].append({
+                                "Evento": f"{teams[0]} vs {teams[1]}",
+                                "Deporte": sport_name,
+                                "Utilidad (%)": utilidad,
+                                "Cuota 1": cuota1,
+                                "Cuota 2": cuota2
+                            })
+                except:
                     continue
+            time.sleep(0.5)
+    return resultados
 
-                match_teams = event.get("teams", ["Equipo 1", "Equipo 2"])
-                match = f"{match_teams[0]} vs {match_teams[1]}"
-                sport = event.get("sport_key", "")
-                sport_simple = sport.split(":")[0]  # soccer:premier_league -> soccer
-
-                if sport_simple in resultados:
-                    resultados[sport_simple].append({
-                        "match": match,
-                        "bookmakers": event["bookmakers"],
-                        "commence_time": event.get("commence_time", "")
-                    })
-        except Exception as e:
-            continue
-
-    st.success("✅ Búsqueda completada")
-
-    with st.expander("📊 Estado de las APIs"):
-        for k, v in creditos_restantes.items():
-            st.write(f"API {k[:8]}...: {v} créditos restantes")
-
-    for deporte, eventos in resultados.items():
-        with st.expander(f"⚽ Surebets en {deporte.capitalize()} ({len(eventos)} encontrados)"):
-            for evento in eventos:
-                st.write(f"📍 {evento['match']} — 🕒 {evento['commence_time']}")
-
+st.title("🎯 Buscador de Surebets por Deporte")
+if st.button("🔍 Buscar Surebets"):
+    with st.status("Buscando...", expanded=True) as status:
+        resultados = buscar_surebets()
+        for deporte, apuestas in resultados.items():
+            if apuestas:
+                st.subheader(f"🟢 Surebets en {deporte}")
+                df = pd.DataFrame(apuestas)
+                st.dataframe(df)
+        status.update(label="✅ Búsqueda completada", state="complete")
 
