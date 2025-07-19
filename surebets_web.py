@@ -4,9 +4,11 @@ import pandas as pd
 from datetime import datetime, timedelta
 import time
 
-st.set_page_config(page_title="Buscador de Surebets", layout="wide")
+# Configuración de la interfaz
+st.set_page_config(page_title="Buscador de Surebets por Deporte", layout="wide")
+st.title("🎯 Buscador de Surebets por Deporte")
 
-# Lista de APIs (50)
+# Lista de 50 claves API
 API_KEYS = [
     "734f30d0866696cf90d5029ac106cfba",
     "10fb6d9d7b3240906d0acea646068535",
@@ -64,75 +66,80 @@ SPORTS = {
     "soccer": "Fútbol",
     "basketball": "Baloncesto",
     "tennis": "Tenis",
-    "baseball": "Béisbol",
+    "baseball": "Béisbol"
 }
 
-# Búsqueda secuencial por API (una a una)
-def fetch_data(api_key, sport):
-    url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds/?apiKey={api_key}&regions=us&markets=h2h&oddsFormat=decimal"
+def fetch_odds(api_key, sport_key):
+    url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds/?apiKey={api_key}&regions=us&markets=h2h&oddsFormat=decimal"
     try:
-        res = requests.get(url, timeout=10)
-        if res.status_code == 200:
-            return res.json()
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            return response.json()
+        return []
     except:
-        pass
-    return []
+        return []
 
-def calcular_surebet(event):
-    sitios = event.get("bookmakers", [])
-    if len(sitios) < 2:
-        return None
-    mejores = {}
-    for sitio in sitios:
-        for market in sitio.get("markets", []):
-            if market["key"] == "h2h":
-                for o in market["outcomes"]:
-                    name = o["name"]
-                    price = o["price"]
-                    if name not in mejores or price > mejores[name]["price"]:
-                        mejores[name] = {"price": price, "site": sitio["title"]}
-    if len(mejores) == 2:
-        cuota1, cuota2 = list(mejores.values())
-        prob = (1 / cuota1["price"]) + (1 / cuota2["price"])
-        if prob < 1:
-            utilidad = round((1 - prob) * 100, 2)
-            tipo_evento = "En vivo" if event.get("in_progress") else "Pre-partido"
-            if tipo_evento == "Pre-partido":
-                hora_evento = datetime.fromisoformat(event["commence_time"].replace("Z", "+00:00"))
-                if hora_evento > datetime.utcnow() + timedelta(hours=48):
-                    return None
-            return {
-                "Evento": f"{event['teams'][0]} vs {event['teams'][1]}",
-                "Tipo": tipo_evento,
-                "Inicio": event["commence_time"].replace("T", " ")[:16],
-                "Casa 1": cuota1["site"],
-                "Cuota 1": cuota1["price"],
-                "Casa 2": cuota2["site"],
-                "Cuota 2": cuota2["price"],
-                "Utilidad (%)": utilidad,
-            }
-    return None
+def tipo_evento(fecha_iso):
+    try:
+        evento_dt = datetime.fromisoformat(fecha_iso.replace("Z", "+00:00"))
+        ahora = datetime.utcnow()
+        diferencia = evento_dt - ahora
+        if timedelta(0) <= diferencia <= timedelta(hours=48):
+            return "Pre-partido"
+        elif diferencia < timedelta(0):
+            return "En Vivo"
+        else:
+            return "Futuro (>48h)"
+    except:
+        return "Desconocido"
 
-def buscar():
-    resultados = {v: [] for v in SPORTS.values()}
+def buscar_surebets():
+    resultados = {nombre: [] for nombre in SPORTS.values()}
     for sport_key, sport_name in SPORTS.items():
-        for key in API_KEYS:
-            datos = fetch_data(key, sport_key)
-            if datos:
-                for ev in datos:
-                    r = calcular_surebet(ev)
-                    if r:
-                        resultados[sport_name].append(r)
-                break  # Usó una API, no sigue con más
-            time.sleep(1)
+        for api_key in API_KEYS:
+            data = fetch_odds(api_key, sport_key)
+            if data:
+                for event in data:
+                    try:
+                        teams = event.get("teams", ["Equipo A", "Equipo B"])
+                        sites = event.get("bookmakers", [])
+                        start_time = event.get("commence_time", "")
+                        tipo = tipo_evento(start_time)
+                        if len(sites) < 2:
+                            continue
+                        cuotas = []
+                        for site in sites:
+                            outcomes = site["markets"][0]["outcomes"]
+                            if len(outcomes) == 2:
+                                cuotas.append((site["title"], outcomes[0]["price"], outcomes[1]["price"]))
+                        if len(cuotas) < 2:
+                            continue
+                        mejor_c1 = max(c[1] for c in cuotas)
+                        mejor_c2 = max(c[2] for c in cuotas)
+                        prob_total = (1 / mejor_c1) + (1 / mejor_c2)
+                        if prob_total < 1:
+                            utilidad = round((1 - prob_total) * 100, 2)
+                            resultados[sport_name].append({
+                                "Evento": f"{teams[0]} vs {teams[1]}",
+                                "Tipo": tipo,
+                                "Cuota 1": mejor_c1,
+                                "Cuota 2": mejor_c2,
+                                "Utilidad (%)": utilidad
+                            })
+                    except:
+                        continue
+                break  # Solo usar una API por deporte
+            time.sleep(0.5)
     return resultados
 
-st.title("🎯 Buscador de Surebets por Deporte (Pre-partido y En Vivo)")
 if st.button("🔍 Buscar Surebets"):
     with st.status("Buscando...", expanded=True) as status:
-        res = buscar()
-        for deporte, lista in res.items():
-            if lista:
-                st.subheader(f"🔹 {deporte}")
-                st.dataframe(pd.DataFrame(lista))
-        status.update(label="✅ Búsqueda Finalizada", state="complete")
+        resultados = buscar_surebets()
+        for deporte, apuestas in resultados.items():
+            if apuestas:
+                st.subheader(f"🟢 Surebets en {deporte}")
+                df = pd.DataFrame(apuestas)
+                df = df.sort_values(by="Utilidad (%)", ascending=False)
+                st.dataframe(df, use_container_width=True)
+        status.update(label="✅ Búsqueda completada", state="complete")
+
