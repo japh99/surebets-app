@@ -1,11 +1,10 @@
 import streamlit as st
 import requests
-import pandas as pd
 from datetime import datetime, timedelta
 import time
 
-# ---------- CONFIGURACIÓN ----------
-API_KEYS = [
+# Lista de 50 APIs
+APIS = [
     "734f30d0866696cf90d5029ac106cfba",
     "10fb6d9d7b3240906d0acea646068535",
     "a9ff72549c4910f1fa9659e175a35cc0",
@@ -58,74 +57,50 @@ API_KEYS = [
     "86de2f86b0b628024ef6d5546b479c0f"
 ]
 
-SPORTS_FILTER = ["soccer", "basketball", "tennis", "baseball"]
-
-# ---------- FUNCIONES ----------
-def try_api_request(endpoint, params):
-    for key in API_KEYS:
-        try:
-            url = f"https://api.the-odds-api.com/v4/sports/{endpoint}/odds/"
-            params["apiKey"] = key
-            response = requests.get(url, params=params)
-            if response.status_code == 200:
-                return response.json(), key
-        except Exception:
-            continue
-    return [], None
-
-def calculate_surebet(bookmakers):
-    best_odds = {}
-    for book in bookmakers:
-        for market in book.get("markets", []):
-            for outcome in market.get("outcomes", []):
-                name = outcome["name"]
-                odd = outcome["price"]
-                if name not in best_odds or odd > best_odds[name]:
-                    best_odds[name] = odd
-    if len(best_odds) >= 2:
-        inv_sum = sum([1/o for o in best_odds.values()])
-        roi = (1 - inv_sum) * 100
-        if roi > 0:
-            return round(roi, 2), best_odds
-    return None, None
-
-# ---------- INTERFAZ STREAMLIT ----------
+st.set_page_config(page_title="Buscador de Surebets por Deporte", layout="centered")
 st.title("🎯 Buscador de Surebets por Deporte")
 
 if st.button("🔍 Buscar Surebets"):
     st.info("Buscando...")
+    resultados = {"soccer": [], "basketball": [], "tennis": [], "baseball": []}
+    creditos_restantes = {}
 
-    results = {sport: [] for sport in SPORTS_FILTER}
-    used_key = None
+    for api_key in APIS:
+        try:
+            url = f"https://api.the-odds-api.com/v4/sports/odds/?regions=us&markets=h2h,totals,spreads&apiKey={api_key}"
+            response = requests.get(url)
+            creditos_restantes[api_key] = int(response.headers.get("x-requests-remaining", 0))
+            if response.status_code != 200:
+                continue
 
-    for sport in SPORTS_FILTER:
-        params = {
-            "regions": "us,eu,uk",
-            "markets": "h2h,spreads,totals",
-            "oddsFormat": "decimal",
-            "dateFormat": "iso"
-        }
-        data, used_key = try_api_request(sport, params)
-        for event in data:
-            roi, odds = calculate_surebet(event["bookmakers"])
-            if roi:
-                results[sport].append({
-                    "match": event["teams"],
-                    "commence": event["commence_time"],
-                    "roi": roi,
-                    "odds": odds
-                })
+            data = response.json()
+            for event in data:
+                if "teams" not in event or "bookmakers" not in event:
+                    continue
 
-    for sport, events in results.items():
-        with st.expander(f"{sport.upper()} ({len(events)} surebets)"):
-            for e in events:
-                st.markdown(f"**{e['match'][0]} vs {e['match'][1]}**")
-                st.markdown(f"📅 {e['commence']}")
-                st.markdown(f"💸 ROI: `{e['roi']}%`")
-                st.markdown(f"Cuotas: `{e['odds']}`")
-                st.divider()
+                match_teams = event.get("teams", ["Equipo 1", "Equipo 2"])
+                match = f"{match_teams[0]} vs {match_teams[1]}"
+                sport = event.get("sport_key", "")
+                sport_simple = sport.split(":")[0]  # soccer:premier_league -> soccer
 
-    with st.expander("🔐 Uso de APIs"):
-        for key in API_KEYS:
-            st.markdown(f"🔑 `{key}` {'✅' if key == used_key else ''}")
+                if sport_simple in resultados:
+                    resultados[sport_simple].append({
+                        "match": match,
+                        "bookmakers": event["bookmakers"],
+                        "commence_time": event.get("commence_time", "")
+                    })
+        except Exception as e:
+            continue
+
+    st.success("✅ Búsqueda completada")
+
+    with st.expander("📊 Estado de las APIs"):
+        for k, v in creditos_restantes.items():
+            st.write(f"API {k[:8]}...: {v} créditos restantes")
+
+    for deporte, eventos in resultados.items():
+        with st.expander(f"⚽ Surebets en {deporte.capitalize()} ({len(eventos)} encontrados)"):
+            for evento in eventos:
+                st.write(f"📍 {evento['match']} — 🕒 {evento['commence_time']}")
+
 
