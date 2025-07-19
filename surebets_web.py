@@ -3,7 +3,7 @@ import requests
 import pandas as pd
 from datetime import datetime, timezone
 
-API_KEY = "3f66f6c67c2bff4b056fb13ec0aa98d8"
+API_KEY = "0901e36296eb76fd7b645f6676cd9f31"
 SPORTS = [
     ("soccer", "⚽ Fútbol"),
     ("basketball", "🏀 Baloncesto"),
