@@ -275,10 +275,9 @@ if st.sidebar.button("🚀 Iniciar Búsqueda Global de Surebets"):
             for market_display_name in selected_markets:
                 market_key = MARKETS[market_display_name]
 
-                # VALIDACIÓN IMPORTANTE: No todos los deportes tienen todos los mercados.
-                # 'full_time_result' (1X2) solo aplica a deportes con empates (ej. fútbol).
-                if market_key == 'full_time_result' and sport_key in ["basketball", "tennis", "baseball_mlb"]:
-                    st.warning(f"El mercado '{market_display_name}' no es común o aplicable para '{sport_name}'. Saltando esta combinación.")
+                # VALIDACIÓN CLAVE: Restringir el mercado 1X2 solo a Fútbol
+                if market_key == 'full_time_result' and sport_key != 'soccer':
+                    st.warning(f"El mercado '{market_display_name}' solo es aplicable para 'Fútbol'. Saltando la búsqueda para '{sport_name}'.")
                     search_count += 1
                     progress_bar.progress(search_count / total_searches)
                     continue
