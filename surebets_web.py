@@ -55,13 +55,13 @@ SPORTS = {
     "Fútbol": "soccer",
     "Baloncesto": "basketball",
     "Tenis": "tennis",
-    "Béisbol": "baseball_mlb", # **SOLUCIÓN 404: Asegurado 'baseball_mlb'**
+    "Béisbol": "baseball_mlb", # Clave correcta para MLB
 }
 
 # --- Diccionario de Mercados ---
 MARKETS = {
     "12 (Ganador sin Empate)": "h2h",
-    "1X2 (Resultado Final)": "full_time_result", # **SOLUCIÓN 422: Cambiado de 'h2h_moneyline' a 'full_time_result'**
+    "1X2 (Resultado Final)": "full_time_result", # Clave corregida para 1X2 en The Odds API
 }
 
 # --- Lógica de Rotación de API Keys y Gestión de Créditos ---
@@ -115,7 +115,7 @@ def find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, selecte
     params = {
         "apiKey": api_key,
         "regions": "us,eu,uk,au",
-        "markets": selected_market_key, # Usar el mercado seleccionado
+        "markets": selected_market_key, # Se usa un único mercado por llamada
         "oddsFormat": "decimal"
     }
     
@@ -130,14 +130,14 @@ def find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, selecte
             return []
         
         if response.status_code == 404:
-            st.error(f"⚠️ **Error 404 para {sport_name} en mercado '{selected_market_key}'**: La URL solicitada no se encontró. Esto podría indicar una 'sport_key' o 'market' incorrecta, o que no hay datos disponibles. URL: {response.url}")
+            st.error(f"⚠️ **Error 404 para {sport_name} en mercado '{selected_market_key}'**: La URL solicitada no se encontró. Esto podría indicar una 'sport_key' o 'market' incorrecta, o que no hay datos disponibles para este deporte/liga en este momento. URL: {response.url}")
             return []
         
-        if response.status_code == 422: # Añadida gestión explícita para 422
+        if response.status_code == 422: # Manejo explícito del error 422
             st.error(f"⚠️ **Error 422 (Entidad No Procesable) para {sport_name} en mercado '{selected_market_key}'**: Esto suele indicar un problema con los parámetros de la solicitud. Verifica que la combinación deporte/mercado sea válida. URL: {response.url}")
             return []
 
-        response.raise_for_status()
+        response.raise_for_status() # Lanza una excepción para otros códigos de error HTTP
         data = response.json()
         
         remaining_requests = response.headers.get('x-requests-remaining', 'N/A')
@@ -177,8 +177,7 @@ def find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, selecte
                                 best_odds[team_name]['bookmaker'] = bookmaker['title']
                             found_outcomes_for_bookmaker.add(team_name)
                         
-                        # Asegurarse de que el bookmaker ofrece todas las cuotas para el mercado seleccionado
-                        # Ejemplo: si es 1X2, que tenga cuota para local, empate y visitante
+                        # Asegurarse de que el bookmaker ofrezca todas las cuotas para el mercado seleccionado
                         if found_outcomes_for_bookmaker != expected_outcomes:
                             continue # No consideramos este bookmaker si no tiene todas las cuotas necesarias para el mercado
 
@@ -277,9 +276,7 @@ if st.sidebar.button("🚀 Iniciar Búsqueda Global de Surebets"):
                 market_key = MARKETS[market_display_name]
 
                 # VALIDACIÓN IMPORTANTE: No todos los deportes tienen todos los mercados.
-                # 'full_time_result' (1X2) es común en fútbol.
-                # 'h2h' (12) es común en todos.
-                # Considera añadir lógica para deshabilitar 1X2 para deportes donde no aplica naturalmente (ej. baloncesto, tenis, béisbol no tienen empate).
+                # 'full_time_result' (1X2) solo aplica a deportes con empates (ej. fútbol).
                 if market_key == 'full_time_result' and sport_key in ["basketball", "tennis", "baseball_mlb"]:
                     st.warning(f"El mercado '{market_display_name}' no es común o aplicable para '{sport_name}'. Saltando esta combinación.")
                     search_count += 1
@@ -294,6 +291,7 @@ if st.sidebar.button("🚀 Iniciar Búsqueda Global de Surebets"):
                 
                 status_text.text(f"Buscando en: {sport_name} - Mercado: {market_display_name} (todas las ligas) usando API Key #{api_key_idx}...")
                 
+                # Se pasa la clave de un único mercado por llamada a la API
                 sport_surebets = find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, market_key)
                 
                 if sport_surebets:
@@ -318,27 +316,27 @@ if st.sidebar.button("🚀 Iniciar Búsqueda Global de Surebets"):
                 
                 df = pd.DataFrame(all_surebets)
                 
-                # Definir el orden de las columnas dinámicamente según si hay 'Selección X'
+                # Definir el orden de las columnas dinámicamente según si hay 'Selección X' (para 1X2)
                 if 'Selección X' in df.columns:
                     column_order = [
                         "Deporte", "Liga/Torneo", "Estado", "Evento", "Mercado", "Fecha (UTC)", 
                         "Utilidad (%)", "Selección 1", "Mejor Cuota 1", "Casa de Apuestas 1",
-                        "Selección X", "Mejor Cuota X", "Casa de Apuestas X", # Columnas para 1X2
+                        "Selección X", "Mejor Cuota X", "Casa de Apuestas X", # Columnas específicas para el empate en 1X2
                         "Selección 2", "Mejor Cuota 2", "Casa de Apuestas 2"
                     ]
-                else: # Para mercado 12 (H2H)
+                else: # Para mercado 12 (H2H) sin empate
                     column_order = [
                         "Deporte", "Liga/Torneo", "Estado", "Evento", "Mercado", "Fecha (UTC)", 
                         "Utilidad (%)", "Selección 1", "Mejor Cuota 1", "Casa de Apuestas 1",
                         "Selección 2", "Mejor Cuota 2", "Casa de Apuestas 2"
                     ]
                 
-                # Asegurarse de que las columnas existan antes de reordenar
+                # Reorganizar el DataFrame para que las columnas aparezcan en el orden deseado
                 df = df.reindex(columns=[col for col in column_order if col in df.columns])
 
+                # Agrupar y mostrar resultados por Deporte y luego por Mercado
                 for sport in df['Deporte'].unique():
                     with st.expander(f"Surebets para {sport}", expanded=True):
-                        # Filtrar por deporte y luego por mercado para expander
                         for market_type in df[df['Deporte'] == sport]['Mercado'].unique():
                             with st.expander(f"Mercado: {market_type}", expanded=True):
                                 sport_market_df = df[(df['Deporte'] == sport) & (df['Mercado'] == market_type)].drop(columns=['Deporte', 'Mercado'])
