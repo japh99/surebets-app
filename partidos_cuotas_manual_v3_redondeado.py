@@ -6,7 +6,7 @@ import pandas as pd
 from itertools import combinations
 
 # --- Configuración de la página ---
-st.set_page_config(page_title="Calculadora de Surebets", layout="centered") # Línea 12: Asegúrate de que no haya caracteres extraños aquí.
+st.set_page_config(page_title="Calculadora de Surebets", layout="centered")
 
 st.title("📊 Calculadora Manual de Surebets (hasta 6 casas)")
 
@@ -53,7 +53,6 @@ if 'last_moneda' not in st.session_state:
 # Actualizar nombres por defecto si la divisa cambia
 if moneda != st.session_state.last_moneda:
     st.session_state.nombres_casas = [casas_predefinidas[moneda][i] for i in range(6)]
-    # Mantener cuotas intactas al cambiar solo el nombre de la casa
 
 st.session_state.last_moneda = moneda # Actualizar la última moneda seleccionada
 
@@ -83,7 +82,7 @@ for i in range(num_casas): # Usamos num_casas del slider
             st.session_state.cuotas_empate[i] = cuota_empate # Actualizar el estado de la sesión
     else:
         # Si el mercado cambia de 3 a 2 resultados, reseteamos la cuota de empate en sesión
-        if st.session_state.cuotas_empate[i] != 1.0: # Solo si no está en el valor por defecto
+        if st.session_state.cuotas_empate[i] != 1.0:
              st.session_state.cuotas_empate[i] = 1.0 # O cualquier otro valor que indique "no aplica"
 
     with col4:
@@ -109,17 +108,6 @@ def calcular_surebet_2_resultados(c1_local, c2_visit, presupuesto):
         stake1 = round((inv1 / total_inv) * presupuesto)
         stake2 = round((inv2 / total_inv) * presupuesto)
         
-        # Ajustar stakes para que la suma sea el presupuesto total si hay pequeños redondeos
-        total_stakes = stake1 + stake2
-        if total_stakes != presupuesto:
-            diff = presupuesto - total_stakes
-            if diff > 0: # Necesitamos añadir
-                if stake1 > stake2: stake1 += diff
-                else: stake2 += diff
-            elif diff < 0: # Necesitamos restar
-                if stake1 > stake2: stake1 += diff # Resta el negativo
-                else: stake2 += diff # Resta el negativo
-
         ganancia = round(min(stake1 * c1_local, stake2 * c2_visit) - presupuesto)
         roi = round((1 - total_inv) * 100, 2)
         return stake1, stake2, ganancia, roi
@@ -139,38 +127,7 @@ def calcular_surebet_3_resultados(c_local, c_empate, c_visitante, presupuesto):
         stake_local = round((inv_local / total_inv) * presupuesto)
         stake_empate = round((inv_empate / total_inv) * presupuesto)
         stake_visitante = round((inv_visitante / total_inv) * presupuesto)
-
-        # Ajustar stakes para que la suma sea el presupuesto total
-        total_stakes = stake_local + stake_empate + stake_visitante
-        if total_stakes != presupuesto:
-            diff = presupuesto - total_stakes
-            # Distribuir la diferencia a los stakes más grandes para mantener la proporción lo mejor posible
-            stakes_list = [stake_local, stake_empate, stake_visitante]
-            stakes_list.sort(reverse=True) # Ordenar de mayor a menor para ajustar los más grandes
-            
-            for k in range(abs(diff)):
-                if diff > 0: # Necesitamos añadir
-                    if k % 3 == 0: stakes_list[0] += 1
-                    elif k % 3 == 1: stakes_list[1] += 1
-                    else: stakes_list[2] += 1
-                else: # Necesitamos restar
-                    if k % 3 == 0: stakes_list[0] -= 1
-                    elif k % 3 == 1: stakes_list[1] -= 1
-                    else: stakes_list[2] -= 1
-            
-            # Asignar de nuevo a las variables originales (esto es un poco rústico, pero funciona para un ajuste fino)
-            # Idealmente, esto sería un mapeo más robusto si las stakes_list no fueran solo 3 elementos
-            # Para este caso simple, podemos reasignar si sabemos el orden
-            # Sin embargo, la asignación original por nombre de casa es más compleja, así que lo dejaremos redondeado
-            # y el ajuste es más una mejora "estética" para que sumen el total
-            
-            # Una forma más simple de distribuir si los stakes son significativos:
-            # Puedes omitir el ajuste fino de 1 en 1 si el redondeo es aceptable para el presupuesto
-            # Aquí, las variables originales ya tienen el valor redondeado más cercano
-            # El ajuste es complejo y puede desbalancear la surebet si no se hace con cuidado.
-            # Por simplicidad y eficacia, los "round" iniciales son el método estándar.
-            # La verificación de "min" en la ganancia ya maneja cualquier pequeña diferencia.
-
+        
         ganancia = round(min(stake_local * c_local, stake_empate * c_empate, stake_visitante * c_visitante) - presupuesto)
         roi = round((1 - total_inv) * 100, 2)
         return stake_local, stake_empate, stake_visitante, ganancia, roi
@@ -181,13 +138,11 @@ if st.button("🔍 Evaluar combinaciones"):
     mejores = []
 
     if tipo_mercado == "2 Resultados (1/2)":
-        # Iterar sobre todas las combinaciones de 2 casas
         for i in range(num_casas):
             for j in range(num_casas):
                 if i == j:
-                    continue # No comparar una casa consigo misma
+                    continue
                 
-                # Ignoramos la cuota de empate en este tipo de mercado
                 nombre1, c1_local, _, c1_visit = casas[i] 
                 nombre2, c2_local, _, c2_visit = casas[j]
 
@@ -195,13 +150,15 @@ if st.button("🔍 Evaluar combinaciones"):
                 stake1, stake2, ganancia, roi = calcular_surebet_2_resultados(c1_local, c2_visit, presupuesto)
                 if ganancia is not None:
                     mejores.append({
-                        "tipo": "Local / Visitante",
-                        "casa1_nombre": nombre1,
-                        "casa1_cuota": c1_local,
-                        "casa1_stake": stake1,
-                        "casa2_nombre": nombre2,
-                        "casa2_cuota": c2_visit,
-                        "casa2_stake": stake2,
+                        "tipo": "2 Resultados",
+                        "apuesta1_casa": nombre1,
+                        "apuesta1_rol": "Local",
+                        "apuesta1_cuota": c1_local,
+                        "apuesta1_stake": stake1,
+                        "apuesta2_casa": nombre2,
+                        "apuesta2_rol": "Visitante",
+                        "apuesta2_cuota": c2_visit,
+                        "apuesta2_stake": stake2,
                         "ganancia": ganancia,
                         "roi": roi
                     })
@@ -210,30 +167,20 @@ if st.button("🔍 Evaluar combinaciones"):
                 stake1_rev, stake2_rev, ganancia_rev, roi_rev = calcular_surebet_2_resultados(c2_local, c1_visit, presupuesto)
                 if ganancia_rev is not None:
                     mejores.append({
-                        "tipo": "Visitante / Local",
-                        "casa1_nombre": nombre2, # Casa 1 ahora es la que tiene la cuota Local
-                        "casa1_cuota": c2_local,
-                        "casa1_stake": stake1_rev,
-                        "casa2_nombre": nombre1, # Casa 2 ahora es la que tiene la cuota Visitante
-                        "casa2_cuota": c1_visit,
-                        "casa2_stake": stake2_rev,
+                        "tipo": "2 Resultados",
+                        "apuesta1_casa": nombre2,
+                        "apuesta1_rol": "Local",
+                        "apuesta1_cuota": c2_local,
+                        "apuesta1_stake": stake1_rev,
+                        "apuesta2_casa": nombre1,
+                        "apuesta2_rol": "Visitante",
+                        "apuesta2_cuota": c1_visit,
+                        "apuesta2_stake": stake2_rev,
                         "ganancia": ganancia_rev,
                         "roi": roi_rev
                     })
     else: # 3 Resultados (1/X/2)
         # Iterar sobre todas las combinaciones de 3 casas para (Local, Empate, Visitante)
-        # Usamos `product` de itertools para obtener todas las combinaciones posibles de índices
-        # Esto permite que una misma casa pueda ser usada para más de un resultado si tiene la mejor cuota
-        # Si quisieras que fueran 3 casas estrictamente diferentes, usarías `combinations` o agregarías una condición `if i_l == i_x or ...`
-        
-        # Para evitar combinaciones redundantes o errores en la asignación de roles de casa:
-        # Se crean ternas de cuotas [cuota_local, cuota_empate, cuota_visitante]
-        # Y se asocian a sus nombres de casa correspondientes.
-        
-        # Iterar a través de todas las posibles combinaciones de 3 casas (puede haber repeticiones si una casa ofrece la mejor cuota para más de un resultado)
-        # Esto es más general, buscando la mejor cuota para L, X, V de CUALQUIER casa
-        
-        # Iterar sobre todas las casas para Local, Empate y Visitante
         for i_l in range(num_casas):
             for i_x in range(num_casas):
                 for i_v in range(num_casas):
@@ -241,107 +188,70 @@ if st.button("🔍 Evaluar combinaciones"):
                     # if i_l == i_x or i_l == i_v or i_x == i_v:
                     #     continue 
 
-                    nombre_l, c_l, _, _ = casas[i_l] # Solo la cuota local
-                    nombre_x, _, c_x, _ = casas[i_x] # Solo la cuota empate
-                    nombre_v, _, _, c_v = casas[i_v] # Solo la cuota visitante
+                    nombre_l, c_l, _, _ = casas[i_l] 
+                    nombre_x, _, c_x, _ = casas[i_x] 
+                    nombre_v, _, _, c_v = casas[i_v] 
                     
                     stake_l, stake_x, stake_v, ganancia, roi = \
                         calcular_surebet_3_resultados(c_l, c_x, c_v, presupuesto)
 
                     if ganancia is not None:
-                        # Crear una clave única para la combinación de casas para evitar duplicados idénticos
-                        # aunque la iteración debería evitarlos para diferentes órdenes de i_l, i_x, i_v
-                        # Esto es más para asegurar unicidad si la misma combinación de 3 cuotas/casas se encuentra
-                        # por caminos diferentes en el bucle.
                         mejores.append({
-                            "tipo": "Local / Empate / Visitante",
-                            "casa_local_nombre": nombre_l,
-                            "casa_local_cuota": c_l,
-                            "casa_local_stake": stake_l,
-                            "casa_empate_nombre": nombre_x,
-                            "casa_empate_cuota": c_x,
-                            "casa_empate_stake": stake_x,
-                            "casa_visitante_nombre": nombre_v,
-                            "casa_visitante_cuota": c_v,
-                            "casa_visitante_stake": stake_v,
+                            "tipo": "3 Resultados",
+                            "apuesta1_casa": nombre_l,
+                            "apuesta1_rol": "Local",
+                            "apuesta1_cuota": c_l,
+                            "apuesta1_stake": stake_l,
+                            "apuesta2_casa": nombre_x,
+                            "apuesta2_rol": "Empate",
+                            "apuesta2_cuota": c_x,
+                            "apuesta2_stake": stake_x,
+                            "apuesta3_casa": nombre_v,
+                            "apuesta3_rol": "Visitante",
+                            "apuesta3_cuota": c_v,
+                            "apuesta3_stake": stake_v,
                             "ganancia": ganancia,
                             "roi": roi
                         })
 
-    # --- Mostrar Resultados ---
+    # --- Mostrar el Mejor Resultado ---
     if mejores:
         st.success("✅ ¡Surebet encontrada!")
         
-        # Ordenar por ROI (Return on Investment) para mostrar las mejores primero
-        mejores_ordenadas = sorted(mejores, key=lambda x: x["roi"], reverse=True)
+        # Ordenar por ROI para mostrar la mejor surebet
+        top_surebet = sorted(mejores, key=lambda x: x["roi"], reverse=True)[0]
 
         st.markdown("---")
-        st.subheader("🏆 Mejores Combinaciones de Surebets")
-        
-        # Mostrar las 5 mejores o todas si hay menos de 5
-        num_a_mostrar = min(len(mejores_ordenadas), 5)
-        
-        for i in range(num_a_mostrar):
-            surebet = mejores_ordenadas[i]
-            st.markdown(f"**Combinación #{i+1} (ROI: {surebet['roi']}%)**")
-            st.markdown(f"**🎯 Evento:** {evento}")
-            st.markdown(f"💰 Ganancia asegurada: **${surebet['ganancia']:,d} {moneda}**")
-            
-            if surebet['tipo'] == "Local / Visitante" or surebet['tipo'] == "Visitante / Local":
-                st.markdown(f"""
-    - **{surebet['casa1_nombre']}**: **${surebet['casa1_stake']:,d} {moneda}** a cuota {surebet['casa1_cuota']}
-    - **{surebet['casa2_nombre']}**: **${surebet['casa2_stake']:,d} {moneda}** a cuota {surebet['casa2_cuota']}
-    """)
-            elif surebet['tipo'] == "Local / Empate / Visitante":
-                st.markdown(f"""
-    - **{surebet['casa_local_nombre']}**: **${surebet['casa_local_stake']:,d} {moneda}** a cuota {surebet['casa_local_cuota']} (Local)
-    - **{surebet['casa_empate_nombre']}**: **${surebet['casa_empate_stake']:,d} {moneda}** a cuota {surebet['casa_empate_cuota']} (Empate)
-    - **{surebet['casa_visitante_nombre']}**: **${surebet['casa_visitante_stake']:,d} {moneda}** a cuota {surebet['casa_visitante_cuota']} (Visitante)
-    """)
-            st.markdown("---")
-        
-        if len(mejores_ordenadas) > num_a_mostrar:
-            st.info(f"Se encontraron {len(mejores_ordenadas) - num_a_mostrar} surebets adicionales. Desplázate hacia abajo para ver el detalle de todas las combinaciones.")
-
+        st.subheader("🏆 La Mejor Surebet Encontrada")
+        st.markdown(f"**🎯 Evento:** {evento}")
+        st.markdown(f"📈 ROI: **{top_surebet['roi']}%**")
+        st.markdown(f"💰 Ganancia asegurada: **${top_surebet['ganancia']:,d} {moneda}**")
         st.markdown("---")
-        st.subheader("📋 Detalle de Todas las Surebets Encontradas")
-        
-        # Convertir la lista de diccionarios a un DataFrame de pandas para mostrar en una tabla
-        df_display_data = []
-        for sb in mejores_ordenadas:
-            if sb['tipo'] == "Local / Visitante" or sb['tipo'] == "Visitante / Local":
-                df_display_data.append({
-                    "Tipo": sb['tipo'],
-                    "Casa 1": sb['casa1_nombre'],
-                    "Cuota 1": sb['casa1_cuota'],
-                    f"Stake 1 ({moneda})": f"${sb['casa1_stake']:,d}",
-                    "Casa 2": sb['casa2_nombre'],
-                    "Cuota 2": sb['casa2_cuota'],
-                    f"Stake 2 ({moneda})": f"${sb['casa2_stake']:,d}",
-                    "Casa 3": "-", "Cuota 3": "-", f"Stake 3 ({moneda})": "-", # Campos vacíos para consistencia
-                    "Ganancia Segura": f"${sb['ganancia']:,d}",
-                    "ROI (%)": sb['roi']
-                })
-            elif sb['tipo'] == "Local / Empate / Visitante":
-                 df_display_data.append({
-                    "Tipo": sb['tipo'],
-                    "Casa 1": f"{sb['casa_local_nombre']} (Local)",
-                    "Cuota 1": sb['casa_local_cuota'],
-                    f"Stake 1 ({moneda})": f"${sb['casa_local_stake']:,d}",
-                    "Casa 2": f"{sb['casa_empate_nombre']} (Empate)",
-                    "Cuota 2": sb['casa_empate_cuota'],
-                    f"Stake 2 ({moneda})": f"${sb['casa_empate_stake']:,d}",
-                    "Casa 3": f"{sb['casa_visitante_nombre']} (Visitante)",
-                    "Cuota 3": sb['casa_visitante_cuota'],
-                    f"Stake 3 ({moneda})": f"${sb['casa_visitante_stake']:,d}",
-                    "Ganancia Segura": f"${sb['ganancia']:,d}",
-                    "ROI (%)": sb['roi']
-                })
-        
-        df = pd.DataFrame(df_display_data)
-        st.dataframe(df, hide_index=True)
 
-
+        st.subheader("🏦 Apuestas a Realizar:")
+        
+        if top_surebet['tipo'] == "2 Resultados":
+            st.markdown(f"""
+- **{top_surebet['apuesta1_casa']}** (para **{top_surebet['apuesta1_rol']}**):
+  - Cuota: {top_surebet['apuesta1_cuota']}
+  - **Apostar: ${top_surebet['apuesta1_stake']:,d} {moneda}**
+- **{top_surebet['apuesta2_casa']}** (para **{top_surebet['apuesta2_rol']}**):
+  - Cuota: {top_surebet['apuesta2_cuota']}
+  - **Apostar: ${top_surebet['apuesta2_stake']:,d} {moneda}**
+""")
+        elif top_surebet['tipo'] == "3 Resultados":
+            st.markdown(f"""
+- **{top_surebet['apuesta1_casa']}** (para **{top_surebet['apuesta1_rol']}**):
+  - Cuota: {top_surebet['apuesta1_cuota']}
+  - **Apostar: ${top_surebet['apuesta1_stake']:,d} {moneda}**
+- **{top_surebet['apuesta2_casa']}** (para **{top_surebet['apuesta2_rol']}**):
+  - Cuota: {top_surebet['apuesta2_cuota']}
+  - **Apostar: ${top_surebet['apuesta2_stake']:,d} {moneda}**
+- **{top_surebet['apuesta3_casa']}** (para **{top_surebet['apuesta3_rol']}**):
+  - Cuota: {top_surebet['apuesta3_cuota']}
+  - **Apostar: ${top_surebet['apuesta3_stake']:,d} {moneda}**
+""")
+        
     else:
         st.warning("❌ No se encontraron combinaciones rentables para el tipo de mercado seleccionado con las cuotas ingresadas. Intenta ajustar los valores o cambia de tipo de mercado.")
 
