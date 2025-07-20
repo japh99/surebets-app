@@ -19,9 +19,6 @@ Esta aplicación detecta oportunidades de **surebets (arbitraje deportivo)** en 
 """)
 
 # --- Lista de API Keys ---
-# NOTA IMPORTANTE: En un entorno de producción o si compartes este código públicamente,
-# considera cargar estas claves desde variables de entorno o un archivo de secretos
-# (.streamlit/secrets.toml) para mayor seguridad y evitar exponerlas.
 API_KEYS = [
     "734f30d0866696cf90d5029ac106cfba", "10fb6d9d7b3240906d0acea646068535",
     "a9ff72549c4910f1fa9659e175a35cc0", "25e9d8872877f5110254ff6ef42056c6",
@@ -55,13 +52,12 @@ SPORTS = {
     "Fútbol": "soccer",
     "Baloncesto": "basketball",
     "Tenis": "tennis",
-    "Béisbol": "baseball_mlb", # Corregido a baseball_mlb para MLB más específica
+    "Béisbol": "baseball_mlb",
 }
 
 # --- Diccionario de Mercados ---
-# Se han eliminado los mercados "totals" y "double_chance" para enfocarse solo en h2h y 1X2
 MARKETS = {
-    "1X2 (Resultado Final)": "full_time_result", # Puesto primero para énfasis
+    "1X2 (Resultado Final)": "full_time_result",
     "12 (Ganador sin Empate)": "h2h",
 }
 
@@ -74,10 +70,6 @@ if 'depleted_api_keys' not in st.session_state:
     st.session_state.depleted_api_keys = []
 
 def get_next_available_api_key_info():
-    """
-    Obtiene la próxima API key disponible (que no haya agotado sus créditos)
-    y su índice. Si todas están agotadas, devuelve None.
-    """
     initial_index = st.session_state.api_key_index
     num_keys = len(API_KEYS)
     
@@ -97,7 +89,6 @@ def get_next_available_api_key_info():
 
 # --- Funciones Principales ---
 def get_event_status(commence_time_str):
-    """Clasifica un evento como 'En Vivo' o 'Pre-Partido'."""
     commence_time = datetime.fromisoformat(commence_time_str.replace('Z', '+00:00'))
     now_utc = datetime.now(timezone.utc)
     
@@ -108,15 +99,14 @@ def get_event_status(commence_time_str):
     else:
         return None
 
-def find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, selected_market_key):
-    """Busca surebets para TODAS las ligas de un deporte específico y un mercado."""
+def find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, selected_market_key, min_surebet_profit_pct): # Nuevo parámetro
     surebets_found = []
     url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds"
     
     params = {
         "apiKey": api_key,
         "regions": "us,eu,uk,au",
-        "markets": selected_market_key, # Se usa un único mercado por llamada
+        "markets": selected_market_key,
         "oddsFormat": "decimal"
     }
     
@@ -138,7 +128,7 @@ def find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, selecte
             st.error(f"⚠️ **Error 422 (Entidad No Procesable) para {sport_name} en mercado '{selected_market_key}'**: Esto suele indicar un problema con los parámetros de la solicitud. Verifica que la combinación deporte/mercado sea válida. URL: {response.url}")
             return []
 
-        response.raise_for_status() # Lanza una excepción para otros códigos de error HTTP
+        response.raise_for_status()
         data = response.json()
         
         remaining_requests = response.headers.get('x-requests-remaining', 'N/A')
@@ -153,8 +143,7 @@ def find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, selecte
             home_team = event['home_team']
             away_team = event['away_team']
             
-            # --- Lógica para cada tipo de mercado ---
-            if selected_market_key == 'h2h': # Mercado 12 (2 vías)
+            if selected_market_key == 'h2h':
                 best_odds = {home_team: {'price': 0, 'bookmaker': ''}, away_team: {'price': 0, 'bookmaker': ''}}
                 
                 if len(event['bookmakers']) < 2:
@@ -176,7 +165,7 @@ def find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, selecte
                 if odds1 > 0 and odds2 > 0:
                     utilidad = (1 - (1/odds1 + 1/odds2)) * 100
                     
-                    if utilidad > 0:
+                    if utilidad > min_surebet_profit_pct: # Usa el nuevo umbral
                         surebets_found.append({
                             "Deporte": sport_name,
                             "Liga/Torneo": event['sport_title'],
@@ -193,7 +182,7 @@ def find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, selecte
                             "Utilidad (%)": f"{utilidad:.2f}%"
                         })
             
-            elif selected_market_key == 'full_time_result': # Mercado 1X2 (3 vías)
+            elif selected_market_key == 'full_time_result':
                 best_odds = {home_team: {'price': 0, 'bookmaker': ''}, 'Draw': {'price': 0, 'bookmaker': ''}, away_team: {'price': 0, 'bookmaker': ''}}
                 expected_outcomes = {home_team, 'Draw', away_team}
 
@@ -212,7 +201,6 @@ def find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, selecte
                                     best_odds[team_name]['bookmaker'] = bookmaker['title']
                                 found_outcomes_for_bookmaker.add(team_name)
                             
-                            # Solo consideramos al bookmaker si tiene las 3 cuotas necesarias (1, X, 2)
                             if found_outcomes_for_bookmaker != expected_outcomes:
                                 continue 
 
@@ -223,7 +211,7 @@ def find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, selecte
                 if odds1 > 0 and oddsX > 0 and odds2 > 0:
                     utilidad = (1 - (1/odds1 + 1/oddsX + 1/odds2)) * 100
                     
-                    if utilidad > 0:
+                    if utilidad > min_surebet_profit_pct: # Usa el nuevo umbral
                         surebets_found.append({
                             "Deporte": sport_name,
                             "Liga/Torneo": event['sport_title'],
@@ -260,15 +248,22 @@ selected_sports = st.sidebar.multiselect(
     default=["Fútbol", "Baloncesto", "Tenis", "Béisbol"] 
 )
 
-# MODIFICACIÓN CLAVE AQUÍ:
-# 1. Se define una lista de mercados disponibles solo con 1X2 y H2H.
 available_markets = ["1X2 (Resultado Final)", "12 (Ganador sin Empate)"]
 
-# 2. Se establece el valor por defecto para que 1X2 sea el principal.
 selected_markets = st.sidebar.multiselect(
     "Selecciona los mercados a escanear:",
     options=available_markets,
-    default=["1X2 (Resultado Final)", "12 (Ganador sin Empate)"] # 1X2 como predeterminado y primero
+    default=["1X2 (Resultado Final)", "12 (Ganador sin Empate)"] 
+)
+
+# Nuevo control deslizante para ajustar el porcentaje de utilidad mínima
+min_surebet_profit_pct = st.sidebar.slider(
+    "Utilidad mínima de Surebet (%)",
+    min_value=0.0,
+    max_value=5.0,
+    value=0.5, # Valor por defecto de 0.5%
+    step=0.1,
+    help="Define el porcentaje mínimo de ganancia que una surebet debe tener para ser mostrada. Un valor más alto filtra surebets marginales, pero reduce la cantidad encontrada."
 )
 
 
@@ -284,53 +279,45 @@ if st.sidebar.button("🚀 Iniciar Búsqueda Global de Surebets"):
         total_searches = len(selected_sports) * len(selected_markets)
         search_count = 0
 
-        # Para dar énfasis al 1X2, se puede iterar sobre los mercados de forma específica
-        # Primero busca 1X2 si está seleccionado, luego h2h.
         markets_to_search_ordered = []
         if "1X2 (Resultado Final)" in selected_markets:
             markets_to_search_ordered.append("1X2 (Resultado Final)")
         if "12 (Ganador sin Empate)" in selected_markets:
             markets_to_search_ordered.append("12 (Ganador sin Empate)")
         
-        # Si el usuario solo seleccionó uno, o si 1X2 no estaba, asegúrate de que haya algo
         if not markets_to_search_ordered and selected_markets:
-            markets_to_search_ordered = selected_markets # Fallback si la lógica de orden no aplica
+            markets_to_search_ordered = selected_markets
 
         for sport_name in selected_sports:
             sport_key = SPORTS[sport_name]
-            for market_display_name in markets_to_search_ordered: # Usa la lista ordenada
+            for market_display_name in markets_to_search_ordered:
                 market_key = MARKETS[market_display_name]
 
-                # Restringir mercados a deportes aplicables
-                # La restricción para 'full_time_result' solo para 'soccer' es importante
                 if market_key == 'full_time_result' and sport_key != 'soccer':
                     st.warning(f"El mercado '{market_display_name}' solo es aplicable para 'Fútbol'. Saltando la búsqueda para '{sport_name}'.")
                     search_count += 1
                     progress_bar.progress(search_count / total_searches)
                     continue
                 
-                # Se eliminan las restricciones para 'totals' y 'double_chance' ya que esos mercados ya no están en MARKETS.
-                # Si en el futuro se añaden otros mercados, se deberán añadir sus restricciones aquí.
-
-
                 api_key, api_key_idx = get_next_available_api_key_info()
                 
                 if api_key is None:
                     st.error("❌ Todas las API Keys disponibles han agotado sus créditos. Por favor, reemplaza las claves agotadas.")
-                    break # Detener la búsqueda si no hay claves disponibles
+                    break
                 
                 status_text.text(f"Buscando en: {sport_name} - Mercado: {market_display_name} (todas las ligas) usando API Key #{api_key_idx}...")
                 
-                sport_surebets = find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, market_key)
+                # Pasar el nuevo umbral a la función de búsqueda
+                sport_surebets = find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, market_key, min_surebet_profit_pct)
                 
                 if sport_surebets:
                     all_surebets.extend(sport_surebets)
                 
                 search_count += 1
                 progress_bar.progress(search_count / total_searches)
-                time.sleep(1) # Pausa para evitar exceder límites de API
+                time.sleep(1)
 
-            if api_key is None: # Si se agotaron las claves durante el bucle de mercados
+            if api_key is None:
                 break
 
         if api_key is not None:
