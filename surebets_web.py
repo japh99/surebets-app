@@ -55,18 +55,13 @@ SPORTS = {
     "Fútbol": "soccer",
     "Baloncesto": "basketball",
     "Tenis": "tennis",
-    "Béisbol": "baseball_mlb",
+    "Béisbol": "baseball_mlb", # **SOLUCIÓN 404: Asegurado 'baseball_mlb'**
 }
 
 # --- Diccionario de Mercados ---
-# Mapeo de nombres de mercado a sus claves de API
 MARKETS = {
     "12 (Ganador sin Empate)": "h2h",
-    "1X2 (Resultado Final)": "h2h_moneyline", # The Odds API usa 'h2h_moneyline' para 1X2 en algunos deportes
-                                               # y 'h2h' para 12/Moneyline.
-                                               # 'h2h' es el más común para 2 vías, 'h2h_moneyline' o 'full_time_result' para 3 vías.
-                                               # Revisa la documentación de The Odds API para el nombre exacto del mercado 1X2.
-                                               # Para fútbol, 'h2h_moneyline' o 'full_time_result' son comunes.
+    "1X2 (Resultado Final)": "full_time_result", # **SOLUCIÓN 422: Cambiado de 'h2h_moneyline' a 'full_time_result'**
 }
 
 # --- Lógica de Rotación de API Keys y Gestión de Créditos ---
@@ -137,6 +132,10 @@ def find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, selecte
         if response.status_code == 404:
             st.error(f"⚠️ **Error 404 para {sport_name} en mercado '{selected_market_key}'**: La URL solicitada no se encontró. Esto podría indicar una 'sport_key' o 'market' incorrecta, o que no hay datos disponibles. URL: {response.url}")
             return []
+        
+        if response.status_code == 422: # Añadida gestión explícita para 422
+            st.error(f"⚠️ **Error 422 (Entidad No Procesable) para {sport_name} en mercado '{selected_market_key}'**: Esto suele indicar un problema con los parámetros de la solicitud. Verifica que la combinación deporte/mercado sea válida. URL: {response.url}")
+            return []
 
         response.raise_for_status()
         data = response.json()
@@ -157,7 +156,7 @@ def find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, selecte
             if selected_market_key == 'h2h': # Mercado 12 (2 vías)
                 best_odds = {home_team: {'price': 0, 'bookmaker': ''}, away_team: {'price': 0, 'bookmaker': ''}}
                 expected_outcomes = {home_team, away_team}
-            elif selected_market_key == 'h2h_moneyline': # Mercado 1X2 (3 vías)
+            elif selected_market_key == 'full_time_result': # Mercado 1X2 (3 vías)
                 best_odds = {home_team: {'price': 0, 'bookmaker': ''}, 'Draw': {'price': 0, 'bookmaker': ''}, away_team: {'price': 0, 'bookmaker': ''}}
                 expected_outcomes = {home_team, 'Draw', away_team}
             else:
@@ -208,7 +207,7 @@ def find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, selecte
                             "Utilidad (%)": f"{utilidad:.2f}%"
                         })
             
-            elif selected_market_key == 'h2h_moneyline': # Mercado 1X2 (3 vías)
+            elif selected_market_key == 'full_time_result': # Mercado 1X2 (3 vías)
                 odds1 = best_odds[home_team]['price']
                 oddsX = best_odds['Draw']['price'] # Empate
                 odds2 = best_odds[away_team]['price']
@@ -278,11 +277,10 @@ if st.sidebar.button("🚀 Iniciar Búsqueda Global de Surebets"):
                 market_key = MARKETS[market_display_name]
 
                 # VALIDACIÓN IMPORTANTE: No todos los deportes tienen todos los mercados.
-                # 'h2h_moneyline' (1X2) es común en fútbol.
+                # 'full_time_result' (1X2) es común en fútbol.
                 # 'h2h' (12) es común en todos.
-                # Si intentas buscar 1X2 en baloncesto o béisbol, la API podría dar 404 o datos vacíos.
                 # Considera añadir lógica para deshabilitar 1X2 para deportes donde no aplica naturalmente (ej. baloncesto, tenis, béisbol no tienen empate).
-                if market_key == 'h2h_moneyline' and sport_key in ["basketball", "tennis", "baseball_mlb"]:
+                if market_key == 'full_time_result' and sport_key in ["basketball", "tennis", "baseball_mlb"]:
                     st.warning(f"El mercado '{market_display_name}' no es común o aplicable para '{sport_name}'. Saltando esta combinación.")
                     search_count += 1
                     progress_bar.progress(search_count / total_searches)
