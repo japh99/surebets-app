@@ -59,11 +59,10 @@ SPORTS = {
 }
 
 # --- Diccionario de Mercados ---
+# Se han eliminado los mercados "totals" y "double_chance" para enfocarse solo en h2h y 1X2
 MARKETS = {
+    "1X2 (Resultado Final)": "full_time_result", # Puesto primero para énfasis
     "12 (Ganador sin Empate)": "h2h",
-    "1X2 (Resultado Final)": "full_time_result",
-    "Más/Menos Goles (Total)": "totals",
-    "Doble Oportunidad": "double_chance",
 }
 
 # --- Lógica de Rotación de API Keys y Gestión de Créditos ---
@@ -157,8 +156,7 @@ def find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, selecte
             # --- Lógica para cada tipo de mercado ---
             if selected_market_key == 'h2h': # Mercado 12 (2 vías)
                 best_odds = {home_team: {'price': 0, 'bookmaker': ''}, away_team: {'price': 0, 'bookmaker': ''}}
-                expected_outcomes = {home_team, away_team}
-
+                
                 if len(event['bookmakers']) < 2:
                     continue
 
@@ -214,8 +212,9 @@ def find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, selecte
                                     best_odds[team_name]['bookmaker'] = bookmaker['title']
                                 found_outcomes_for_bookmaker.add(team_name)
                             
+                            # Solo consideramos al bookmaker si tiene las 3 cuotas necesarias (1, X, 2)
                             if found_outcomes_for_bookmaker != expected_outcomes:
-                                continue # No consideramos este bookmaker si no tiene todas las cuotas necesarias para el mercado
+                                continue 
 
                 odds1 = best_odds[home_team]['price']
                 oddsX = best_odds['Draw']['price']
@@ -243,61 +242,6 @@ def find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, selecte
                             "Casa de Apuestas 2": best_odds[away_team]['bookmaker'],
                             "Utilidad (%)": f"{utilidad:.2f}%"
                         })
-
-            elif selected_market_key == 'totals': # Mercado Over/Under
-                if len(event['bookmakers']) < 2:
-                    continue
-
-                best_totals_odds = {} # {'2.5': {'over': {'price':X, 'book':Y}, 'under': {'price':A, 'book':B}}}
-
-                for bookmaker in event['bookmakers']:
-                    for market in bookmaker['markets']:
-                        if market['key'] == 'totals' and 'point' in market:
-                            point = str(market['point']) # La línea del total (ej. 2.5)
-                            
-                            if point not in best_totals_odds:
-                                best_totals_odds[point] = {'Over': {'price': 0, 'bookmaker': ''}, 'Under': {'price': 0, 'bookmaker': ''}}
-
-                            for outcome in market['outcomes']:
-                                outcome_name = outcome['name'] # "Over" o "Under"
-                                price = outcome['price']
-
-                                if outcome_name in best_totals_odds[point] and price > best_totals_odds[point][outcome_name]['price']:
-                                    best_totals_odds[point][outcome_name]['price'] = price
-                                    best_totals_odds[point][outcome_name]['bookmaker'] = bookmaker['title']
-                
-                # Calcular surebets para cada línea de total encontrada
-                for point, odds_data in best_totals_odds.items():
-                    odds_over = odds_data['Over']['price']
-                    odds_under = odds_data['Under']['price']
-
-                    if odds_over > 0 and odds_under > 0:
-                        utilidad = (1 - (1/odds_over + 1/odds_under)) * 100
-                        
-                        if utilidad > 0:
-                            surebets_found.append({
-                                "Deporte": sport_name,
-                                "Liga/Torneo": event['sport_title'],
-                                "Estado": status,
-                                "Evento": f"{home_team} vs {away_team}",
-                                "Mercado": f"Más/Menos {point}",
-                                "Fecha (UTC)": datetime.fromisoformat(event['commence_time'].replace('Z', '')).strftime('%Y-%m-%d %H:%M'),
-                                "Selección 1": f"Más de {point}",
-                                "Mejor Cuota 1": odds_over,
-                                "Casa de Apuestas 1": odds_data['Over']['bookmaker'],
-                                "Selección 2": f"Menos de {point}",
-                                "Mejor Cuota 2": odds_under,
-                                "Casa de Apuestas 2": odds_data['Under']['bookmaker'],
-                                "Utilidad (%)": f"{utilidad:.2f}%"
-                            })
-
-            elif selected_market_key == 'double_chance': # Mercado Doble Oportunidad
-                # El arbitraje de 2 patas para 'double_chance' en la API de The Odds requiere
-                # combinar con el mercado full_time_result (1X2), lo cual no se hace en una sola llamada 'markets'.
-                # Mantener esta sección como informativa por ahora.
-                st.warning(f"La búsqueda de surebets para el mercado 'Doble Oportunidad' es más compleja y puede requerir la combinación con otras llamadas a la API (ej. 1X2). Actualmente, no se está procesando activamente para surebets de 2 patas simples en este código.")
-                continue # Saltar esta iteración para evitar complejidades.
-
         return surebets_found
 
     except requests.exceptions.RequestException as e:
@@ -316,11 +260,17 @@ selected_sports = st.sidebar.multiselect(
     default=["Fútbol", "Baloncesto", "Tenis", "Béisbol"] 
 )
 
+# MODIFICACIÓN CLAVE AQUÍ:
+# 1. Se define una lista de mercados disponibles solo con 1X2 y H2H.
+available_markets = ["1X2 (Resultado Final)", "12 (Ganador sin Empate)"]
+
+# 2. Se establece el valor por defecto para que 1X2 sea el principal.
 selected_markets = st.sidebar.multiselect(
     "Selecciona los mercados a escanear:",
-    options=list(MARKETS.keys()),
-    default=["12 (Ganador sin Empate)", "1X2 (Resultado Final)", "Más/Menos Goles (Total)"]
+    options=available_markets,
+    default=["1X2 (Resultado Final)", "12 (Ganador sin Empate)"] # 1X2 como predeterminado y primero
 )
+
 
 if st.sidebar.button("🚀 Iniciar Búsqueda Global de Surebets"):
     if not selected_sports or not selected_markets:
@@ -334,23 +284,33 @@ if st.sidebar.button("🚀 Iniciar Búsqueda Global de Surebets"):
         total_searches = len(selected_sports) * len(selected_markets)
         search_count = 0
 
+        # Para dar énfasis al 1X2, se puede iterar sobre los mercados de forma específica
+        # Primero busca 1X2 si está seleccionado, luego h2h.
+        markets_to_search_ordered = []
+        if "1X2 (Resultado Final)" in selected_markets:
+            markets_to_search_ordered.append("1X2 (Resultado Final)")
+        if "12 (Ganador sin Empate)" in selected_markets:
+            markets_to_search_ordered.append("12 (Ganador sin Empate)")
+        
+        # Si el usuario solo seleccionó uno, o si 1X2 no estaba, asegúrate de que haya algo
+        if not markets_to_search_ordered and selected_markets:
+            markets_to_search_ordered = selected_markets # Fallback si la lógica de orden no aplica
+
         for sport_name in selected_sports:
             sport_key = SPORTS[sport_name]
-            for market_display_name in selected_markets:
+            for market_display_name in markets_to_search_ordered: # Usa la lista ordenada
                 market_key = MARKETS[market_display_name]
 
                 # Restringir mercados a deportes aplicables
+                # La restricción para 'full_time_result' solo para 'soccer' es importante
                 if market_key == 'full_time_result' and sport_key != 'soccer':
                     st.warning(f"El mercado '{market_display_name}' solo es aplicable para 'Fútbol'. Saltando la búsqueda para '{sport_name}'.")
                     search_count += 1
                     progress_bar.progress(search_count / total_searches)
                     continue
                 
-                if market_key in ['totals', 'double_chance'] and sport_key not in ['soccer', 'basketball', 'baseball_mlb']:
-                     st.warning(f"El mercado '{market_display_name}' no es comúnmente aplicable para '{sport_name}'. Saltando la búsqueda.")
-                     search_count += 1
-                     progress_bar.progress(search_count / total_searches)
-                     continue
+                # Se eliminan las restricciones para 'totals' y 'double_chance' ya que esos mercados ya no están en MARKETS.
+                # Si en el futuro se añaden otros mercados, se deberán añadir sus restricciones aquí.
 
 
                 api_key, api_key_idx = get_next_available_api_key_info()
