@@ -1,4 +1,4 @@
-  import streamlit as st
+ import streamlit as st
 import pandas as pd
 import requests
 from datetime import datetime, timedelta, timezone
@@ -55,15 +55,15 @@ SPORTS = {
     "Fútbol": "soccer",
     "Baloncesto": "basketball",
     "Tenis": "tennis",
-    "Béisbol": "baseball_mlb",
+    "Béisbol": "baseball_mlb", # Corregido a baseball_mlb para MLB más específica
 }
 
 # --- Diccionario de Mercados ---
 MARKETS = {
     "12 (Ganador sin Empate)": "h2h",
     "1X2 (Resultado Final)": "full_time_result",
-    "Más/Menos Goles (Total)": "totals", # Nuevo mercado para Over/Under
-    "Doble Oportunidad": "double_chance", # Nuevo mercado para Doble Oportunidad
+    "Más/Menos Goles (Total)": "totals",
+    "Doble Oportunidad": "double_chance",
 }
 
 # --- Lógica de Rotación de API Keys y Gestión de Créditos ---
@@ -244,15 +244,10 @@ def find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, selecte
                             "Utilidad (%)": f"{utilidad:.2f}%"
                         })
 
-            elif selected_market_key == 'totals': # Nuevo: Mercado Over/Under
-                # The Odds API devuelve múltiples líneas de totals (ej. Over/Under 2.5, 3.5)
-                # Necesitamos iterar sobre ellas para encontrar surebets.
-                # Cada 'market' en 'bookmaker' para 'totals' tendrá una 'point'
-                
+            elif selected_market_key == 'totals': # Mercado Over/Under
                 if len(event['bookmakers']) < 2:
                     continue
 
-                # Recopilar las mejores cuotas Over/Under por cada 'point' (línea de gol/punto)
                 best_totals_odds = {} # {'2.5': {'over': {'price':X, 'book':Y}, 'under': {'price':A, 'book':B}}}
 
                 for bookmaker in event['bookmakers']:
@@ -285,7 +280,7 @@ def find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, selecte
                                 "Liga/Torneo": event['sport_title'],
                                 "Estado": status,
                                 "Evento": f"{home_team} vs {away_team}",
-                                "Mercado": f"Más/Menos {point}", # Ejemplo: Más/Menos 2.5
+                                "Mercado": f"Más/Menos {point}",
                                 "Fecha (UTC)": datetime.fromisoformat(event['commence_time'].replace('Z', '')).strftime('%Y-%m-%d %H:%M'),
                                 "Selección 1": f"Más de {point}",
                                 "Mejor Cuota 1": odds_over,
@@ -296,93 +291,12 @@ def find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, selecte
                                 "Utilidad (%)": f"{utilidad:.2f}%"
                             })
 
-            elif selected_market_key == 'double_chance': # Nuevo: Mercado Doble Oportunidad
-                # Doble Oportunidad tiene 3 resultados: "Home/Draw", "Away/Draw", "Home/Away"
-                # Para surebets de 2 patas, buscaremos cubrir dos de estas opciones con una tercera implícita.
-                # Lo más común es (Home/Draw vs Away/Win) o (Away/Draw vs Home/Win)
-                # O (Home/Win OR Away/Win vs Draw) (esto es un 1X2 al revés)
-                # Simplificamos buscando 2 patas: 1X vs X2
-                
-                best_odds_do = {
-                    f"{home_team}/Draw": {'price': 0, 'bookmaker': ''},
-                    f"{away_team}/Draw": {'price': 0, 'bookmaker': ''},
-                    f"{home_team}/{away_team}": {'price': 0, 'bookmaker': ''} # También conocido como "Home/Away"
-                }
-
-                if len(event['bookmakers']) < 2:
-                    continue
-
-                for bookmaker in event['bookmakers']:
-                    for market in bookmaker['markets']:
-                        if market['key'] == selected_market_key:
-                            for outcome in market['outcomes']:
-                                outcome_name = outcome['name']
-                                price = outcome['price']
-
-                                # Mapear los nombres de outcomes de la API a las claves que esperamos
-                                if outcome_name == home_team + " / Draw":
-                                    key_name = f"{home_team}/Draw"
-                                elif outcome_name == away_team + " / Draw":
-                                    key_name = f"{away_team}/Draw"
-                                elif outcome_name == home_team + " / " + away_team:
-                                    key_name = f"{home_team}/{away_team}"
-                                else:
-                                    continue # Ignorar otros nombres si los hubiera
-
-                                if key_name in best_odds_do and price > best_odds_do[key_name]['price']:
-                                    best_odds_do[key_name]['price'] = price
-                                    best_odds_do[key_name]['bookmaker'] = bookmaker['title']
-                
-                # Estrategias de surebet para Doble Oportunidad (2 patas)
-                # Opcion 1: Home/Draw (1X) vs Away/Win (2)
-                # Esto es equivalente a un 1X2, pero las cuotas de 1X y X2 ya están consolidadas.
-                # Para un arbitraje de 2 patas en Doble Oportunidad, buscamos cubrir dos de las tres opciones.
-                # Las combinaciones comunes de surebets DO son: (1X y 2) o (X2 y 1)
-                # Aquí, nos enfocaremos en encontrar (1X vs Ganar Visitante)
-                # O (X2 vs Ganar Local)
-                # Esto requiere buscar la mejor cuota de 1X (Home/Draw) y la mejor cuota de 2 (Away/Win del mercado 1X2),
-                # lo cual implicaría otra llamada API o lógica más compleja.
-                # Para simplificar y mantenerlo como 2 patas directas del mercado double_chance:
-                # La surebet DO más directa es entre (1X y 2 o X2 y 1) o (12 y X)
-                # Pero en la API, double_chance da 1X, X2, 12.
-                # Para una surebet de 2 patas, podríamos usar (1X) vs (2/X) que sería buscar la mejor (1X) y la mejor (2) del 1X2 original y la mejor (X) del 1X2 original
-                # Lo más directo es: Cubrir 1X y 2 o X2 y 1. Sin embargo, "2" y "1" no son outcomes directos de double_chance.
-                # La verdadera surebet con double_chance es entre (1X y 2) o (X2 y 1)
-                # Para tener 2 patas, vamos a comparar (1X vs 2) y (X2 vs 1)
-                # PERO LA API NO DA "1" Y "2" COMO OUTCOMES DEL MERCADO DOUBLE_CHANCE.
-                # Da "Home/Draw", "Away/Draw", "Home/Away"
-                # Entonces, una surebet de 2 patas para "double_chance" es (Home/Draw) vs (Away/Win) - NO DISPONIBLE EN UNA SOLA LLAMADA A ESTE MERCADO
-                # La única surebet de 2 patas DIRECTA es comparar "Home/Draw" con "Away/Draw" si las cuotas fueran extrañas, lo cual casi nunca es una surebet.
-
-                # Para un arbitraje real con 'double_chance' necesitaríamos obtener también las cuotas de 'full_time_result'
-                # y buscar: (mejor cuota 1X) y (mejor cuota 2 del 1X2)
-                # O (mejor cuota X2) y (mejor cuota 1 del 1X2)
-                # Como esto implicaría complejizar el 'markets' parameter en la llamada a la API o hacer dos llamadas,
-                # por ahora lo implementaremos de forma que se buscará 1X2, pero usando los nombres de doble oportunidad.
-                # Esta parte requeriría una lógica de combinación más avanzada o un cambio en la estructura de la API.
-
-                # Para simplicidad y la intención de "2 patas" en DO:
-                # Buscaremos una surebet entre Home/Draw y Away/Draw. Esto casi nunca da una surebet,
-                # ya que 1X y X2 se solapan en el empate.
-                # La forma correcta de hacer surebet con DO es 1X vs 2(FT), o X2 vs 1(FT)
-                # Como ya tenemos el mercado 1X2, y el H2H (12)
-                # El mercado 'double_chance' en The Odds API es (Home/Draw, Away/Draw, Home/Away)
-                # La surebet entre Home/Draw y Home/Away no tiene sentido directo.
-
-                # Si solo queremos usar los outcomes de 'double_chance':
-                # La única forma "lógica" de 2 patas sería si se pudiera apostar a 1X y la inversa de (1X) que es 2.
-                # Pero la API no da "2" como un outcome de "double_chance".
-                # Por lo tanto, el arbitraje en 'double_chance' es más complejo y a menudo implica combinarlo con 1X2.
-
-                # Desactivaremos la búsqueda activa de surebets de doble oportunidad de 2 patas por ahora
-                # si no podemos asegurar que las 2 patas cubran el 100% de los resultados sin solapamiento
-                # o sin traer datos de otro mercado (1X2).
+            elif selected_market_key == 'double_chance': # Mercado Doble Oportunidad
+                # El arbitraje de 2 patas para 'double_chance' en la API de The Odds requiere
+                # combinar con el mercado full_time_result (1X2), lo cual no se hace en una sola llamada 'markets'.
+                # Mantener esta sección como informativa por ahora.
                 st.warning(f"La búsqueda de surebets para el mercado 'Doble Oportunidad' es más compleja y puede requerir la combinación con otras llamadas a la API (ej. 1X2). Actualmente, no se está procesando activamente para surebets de 2 patas simples en este código.")
-                continue # Saltar esta iteración por ahora.
-                # Si se desea implementar, la lógica iría aquí, buscando por ejemplo:
-                # odds_1X = best_odds_do[f"{home_team}/Draw"]['price']
-                # odds_2_from_1X2 = ... (necesitaría obtenerse de full_time_result)
-                # Luego calcular (1/odds_1X + 1/odds_2_from_1X2) < 1
+                continue # Saltar esta iteración para evitar complejidades.
 
         return surebets_found
 
@@ -405,7 +319,7 @@ selected_sports = st.sidebar.multiselect(
 selected_markets = st.sidebar.multiselect(
     "Selecciona los mercados a escanear:",
     options=list(MARKETS.keys()),
-    default=["12 (Ganador sin Empate)", "1X2 (Resultado Final)", "Más/Menos Goles (Total)"] # Default updated
+    default=["12 (Ganador sin Empate)", "1X2 (Resultado Final)", "Más/Menos Goles (Total)"]
 )
 
 if st.sidebar.button("🚀 Iniciar Búsqueda Global de Surebets"):
@@ -432,8 +346,6 @@ if st.sidebar.button("🚀 Iniciar Búsqueda Global de Surebets"):
                     progress_bar.progress(search_count / total_searches)
                     continue
                 
-                # Restricción para 'totals' y 'double_chance' - principalmente fútbol o deportes con goles/puntos
-                # Generalmente aplican a fútbol, baloncesto, etc. No a tenis directo.
                 if market_key in ['totals', 'double_chance'] and sport_key not in ['soccer', 'basketball', 'baseball_mlb']:
                      st.warning(f"El mercado '{market_display_name}' no es comúnmente aplicable para '{sport_name}'. Saltando la búsqueda.")
                      search_count += 1
@@ -449,7 +361,6 @@ if st.sidebar.button("🚀 Iniciar Búsqueda Global de Surebets"):
                 
                 status_text.text(f"Buscando en: {sport_name} - Mercado: {market_display_name} (todas las ligas) usando API Key #{api_key_idx}...")
                 
-                # Se pasa la clave de un único mercado por llamada a la API
                 sport_surebets = find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, market_key)
                 
                 if sport_surebets:
@@ -474,8 +385,6 @@ if st.sidebar.button("🚀 Iniciar Búsqueda Global de Surebets"):
                 
                 df = pd.DataFrame(all_surebets)
                 
-                # Definir el orden de las columnas dinámicamente
-                # Lista de todas las posibles columnas que pueden aparecer
                 all_possible_columns = [
                     "Deporte", "Liga/Torneo", "Estado", "Evento", "Mercado", "Fecha (UTC)", 
                     "Utilidad (%)", "Selección 1", "Mejor Cuota 1", "Casa de Apuestas 1",
@@ -483,10 +392,8 @@ if st.sidebar.button("🚀 Iniciar Búsqueda Global de Surebets"):
                     "Selección 2", "Mejor Cuota 2", "Casa de Apuestas 2"
                 ]
                 
-                # Filtrar y reordenar el DataFrame para que las columnas aparezcan en el orden deseado
                 df = df.reindex(columns=[col for col in all_possible_columns if col in df.columns])
 
-                # Agrupar y mostrar resultados por Deporte y luego por Mercado
                 for sport in df['Deporte'].unique():
                     with st.expander(f"Surebets para {sport}", expanded=True):
                         for market_type in df[df['Deporte'] == sport]['Mercado'].unique():
@@ -516,5 +423,4 @@ if st.session_state.depleted_api_keys:
 else:
     st.sidebar.success("✅ Todas las API Keys están activas (o no se han detectado agotadas aún).")
 st.sidebar.markdown("---")
-st.sidebar.markdown("Autor: **JAPH99** 🇨🇴")             
-    
+st.sidebar.markdown("Autor: **JAPH99** 🇨🇴")
