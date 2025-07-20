@@ -55,13 +55,13 @@ SPORTS = {
     "Fútbol": "soccer",
     "Baloncesto": "basketball",
     "Tenis": "tennis",
-    "Béisbol": "baseball_mlb", # PUNTO CLAVE 2: Clave correcta para MLB
+    "Béisbol": "baseball_mlb", # Solución 404: Clave correcta para MLB
 }
 
 # --- Diccionario de Mercados ---
 MARKETS = {
     "12 (Ganador sin Empate)": "h2h",
-    "1X2 (Resultado Final)": "full_time_result", # PUNTO CLAVE 1: Clave corregida para 1X2 en The Odds API
+    "1X2 (Resultado Final)": "full_time_result", # Solución 422: Clave corregida para 1X2 en The Odds API
 }
 
 # --- Lógica de Rotación de API Keys y Gestión de Créditos ---
@@ -130,12 +130,10 @@ def find_surebets_for_sport(sport_name, sport_key, api_key, api_key_idx, selecte
             return []
         
         if response.status_code == 404:
-            # Error 404 manejado aquí
             st.error(f"⚠️ **Error 404 para {sport_name} en mercado '{selected_market_key}'**: La URL solicitada no se encontró. Esto podría indicar una 'sport_key' o 'market' incorrecta, o que no hay datos disponibles para este deporte/liga en este momento. URL: {response.url}")
             return []
         
         if response.status_code == 422: 
-            # Error 422 manejado aquí
             st.error(f"⚠️ **Error 422 (Entidad No Procesable) para {sport_name} en mercado '{selected_market_key}'**: Esto suele indicar un problema con los parámetros de la solicitud. Verifica que la combinación deporte/mercado sea válida. URL: {response.url}")
             return []
 
@@ -277,7 +275,7 @@ if st.sidebar.button("🚀 Iniciar Búsqueda Global de Surebets"):
             for market_display_name in selected_markets:
                 market_key = MARKETS[market_display_name]
 
-                # PUNTO CLAVE 3: Restringir el mercado 1X2 solo a Fútbol
+                # Lógica para restringir el mercado 1X2 solo a Fútbol
                 if market_key == 'full_time_result' and sport_key != 'soccer':
                     st.warning(f"El mercado '{market_display_name}' solo es aplicable para 'Fútbol'. Saltando la búsqueda para '{sport_name}'.")
                     search_count += 1
