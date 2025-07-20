@@ -19,7 +19,7 @@ st.subheader("📝 Ingresar evento y configuración")
 
 evento = st.text_input("Nombre del evento", value="Ej: Nacional vs Millonarios")
 moneda = st.selectbox("Divisa", ["COP", "EUR", "USD"])
-# SOLUCIÓN: Cambiar los valores de min_value, value y step a enteros
+# SOLUCIÓN para la advertencia anterior: Cambiar los valores de min_value, value y step a enteros
 presupuesto = st.number_input(f"Presupuesto total ({moneda})", min_value=10, value=100000, step=1000, format="%d")
 
 # Opciones de mercado
@@ -116,7 +116,7 @@ def calcular_surebet_2_resultados(c1_local, c2_visit, presupuesto):
 def calcular_surebet_3_resultados(c_local, c_empate, c_visitante, presupuesto):
     """Calcula surebet para 3 resultados (Local/Empate/Visitante) entre 3 cuotas."""
     if c_local <= 1.01 or c_empate <= 1.01 or c_visitante <= 1.01: # Validar cuotas válidas
-        return None, None, None, None, None, None, None
+        return None, None, None, None, None # SOLUCIÓN: Ahora devuelve 5 None's
     
     inv_local = 1 / c_local
     inv_empate = 1 / c_empate
@@ -131,7 +131,7 @@ def calcular_surebet_3_resultados(c_local, c_empate, c_visitante, presupuesto):
         ganancia = round(min(stake_local * c_local, stake_empate * c_empate, stake_visitante * c_visitante) - presupuesto)
         roi = round((1 - total_inv) * 100, 2)
         return stake_local, stake_empate, stake_visitante, ganancia, roi
-    return None, None, None, None, None, None, None
+    return None, None, None, None, None # SOLUCIÓN: Ahora devuelve 5 None's
 
 # --- Lógica de Evaluación ---
 if st.button("🔍 Evaluar combinaciones"):
