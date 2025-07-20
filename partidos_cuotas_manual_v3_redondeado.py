@@ -19,8 +19,8 @@ st.subheader("📝 Ingresar evento y configuración")
 
 evento = st.text_input("Nombre del evento", value="Ej: Nacional vs Millonarios")
 moneda = st.selectbox("Divisa", ["COP", "EUR", "USD"])
-# Formato de presupuesto sin decimales y con separador de miles
-presupuesto = st.number_input(f"Presupuesto total ({moneda})", min_value=10.0, value=100000.0, step=1000.0, format="%d")
+# SOLUCIÓN: Cambiar los valores de min_value, value y step a enteros
+presupuesto = st.number_input(f"Presupuesto total ({moneda})", min_value=10, value=100000, step=1000, format="%d")
 
 # Opciones de mercado
 tipo_mercado = st.radio("Tipo de mercado", ["2 Resultados (1/2)", "3 Resultados (1/X/2)"], index=0)
