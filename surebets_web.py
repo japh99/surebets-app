@@ -503,7 +503,7 @@ with tab1:
         "Mostrar eventos con al menos esta antelación:",
         options=[6, 12, 24], # Añadida opción de 24 horas
         index=0, # Por defecto 6 horas
-        format_func=lambda x: f"{x} horas"
+        # Eliminado format_func para compatibilidad con versiones antiguas de Streamlit
     )
     max_hours_ahead = st.sidebar.slider(
         "Mostrar eventos con un máximo de antelación (horas):",
@@ -512,10 +512,19 @@ with tab1:
         value=72,
         step=12
     )
+    
+    # Mostrar el conteo de API Keys disponibles y agotadas
+    active_keys_count = sum(1 for status in st.session_state.api_key_status.values() if status)
+    depleted_keys_count = len(st.session_state.depleted_api_keys)
+    st.sidebar.info(f"🔑 **API Keys Activas:** {active_keys_count}/{len(API_KEYS)}")
+    if depleted_keys_count > 0:
+        st.sidebar.warning(f"❌ **API Keys Agotadas:** {depleted_keys_count}")
 
     if st.sidebar.button("🚀 Iniciar Búsqueda de Surebets"):
         if not selected_sports:
             st.warning("Por favor, selecciona al menos un deporte para buscar.")
+        elif active_keys_count == 0:
+            st.error("❌ No hay API Keys activas disponibles. Por favor, verifica tus claves o espera el reseteo de créditos.")
         else:
             results_placeholder = st.empty() # Placeholder para mostrar los resultados
             progress_bar = st.progress(0) # Barra de progreso de la búsqueda
@@ -550,12 +559,13 @@ with tab1:
                             st.session_state.api_key_status[used_api_key] = False
                             if used_api_key not in st.session_state.depleted_api_keys:
                                 st.session_state.depleted_api_keys.append(used_api_key)
-                            st.warning(f"⚠️ La API Key #{used_api_key_idx} (termina en {used_api_key[-4:]}) parece haber agotado sus créditos. Error: {task_error_message}")
+                            st.warning(f"⚠️ La API Key #{used_api_key_idx+1} (termina en {used_api_key[-4:]}) parece haber agotado sus créditos. Error: {task_error_message}")
                         elif task_error_message:
-                            st.error(f"Error para '{sport_name}' con API Key {used_api_key_idx} ({used_api_key[-4:]}): {task_error_message}")
+                            st.error(f"Error para '{sport_name}' con API Key #{used_api_key_idx+1} ({used_api_key[-4:]}): {task_error_message}")
                         else:
                             # Mostrar información de uso de la API en la barra lateral para la key usada
-                            st.sidebar.info(f"API Key #{used_api_key_idx} (usando {used_api_key[-4:]}..) | Usados: {used_reqs} | Restantes: {remaining_reqs}")
+                            # st.sidebar.info(f"API Key #{used_api_key_idx+1} (usando {used_api_key[-4:]}..) | Usados: {used_reqs} | Restantes: {remaining_reqs}")
+                            pass # Ya no es necesario mostrar por cada key usada individualmente si ya tenemos el conteo total
 
                         if surebets_for_sport:
                             all_surebets.extend(surebets_for_sport)
