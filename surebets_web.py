@@ -27,7 +27,7 @@ API_KEYS = [
     "fbd5dece2a99c992cfd783aedfcd2ef3", "687ba857bcae9c7f33545dcbe59aeb2b",
     "f9ff83040b9d2afc1862094694f53da2", "f730fa9137a7cd927554df334af916dc",
     "9091ec0ea25e0cdfc161b91603e31a9a", "c0f7d526dd778654dfee7c0686124a77",
-    "61a015bc1506aac11ec62901a6189dc6", "d585a73190a117c1041ccc778b92b23d9",
+    "61a015bc1506aac11ec62901a6189dc6", "d585a73190a117c1041ccc78b92b23d9",
     "4056628d07b0b900175cb332c191cda0", "ac4d3eb2d6df42030568eadeee906770",
     "3cebba62ff5330d1a409160e6870bfd6", "358644d442444f95bd0b0278e4d3ea22",
     "45dff0519cde0396df06fc4bc1f9bce1", "a4f585765036f57be0966b39125f87a0",
@@ -102,7 +102,7 @@ if 'last_moneda_manual' not in st.session_state:
 
 # --- Funciones Auxiliares para el Buscador ---
 
-def get_next_available_api_key_info_SAFE():
+def get_next_available_api_key_info():
     """
     Obtiene la próxima API key disponible y su índice de forma segura para Streamlit.
     Esta función DEBE ser llamada SOLAMENTE desde el hilo principal de Streamlit
@@ -111,20 +111,23 @@ def get_next_available_api_key_info_SAFE():
     initial_index = st.session_state.api_key_index
     num_keys = len(API_KEYS)
     
-    for _ in range(num_keys):
+    # Intentar encontrar una clave activa en el rango actual
+    for _ in range(num_keys): # Iterar a través de todas las claves si es necesario
         current_key_index = st.session_state.api_key_index
         current_key = API_KEYS[current_key_index]
         
+        # Verificar si la clave actual está activa
         if st.session_state.api_key_status.get(current_key, True):
-            # Mueve el índice para la próxima llamada
+            # Si está activa, avanzamos el índice para la próxima vez y la devolvemos
             st.session_state.api_key_index = (current_key_index + 1) % num_keys
             return current_key, current_key_index
         
-        # Si la key actual no está activa, avanza al siguiente índice
+        # Si la clave actual no está activa, simplemente avanzamos al siguiente índice
         st.session_state.api_key_index = (current_key_index + 1) % num_keys
         
+        # Si hemos dado una vuelta completa y no encontramos ninguna clave activa, salimos
         if st.session_state.api_key_index == initial_index:
-            break # Todas las keys han sido revisadas y están agotadas
+            break
 
     return None, None # No hay keys disponibles
 
@@ -133,6 +136,7 @@ def get_event_status(commence_time_str):
     Clasifica un evento como 'En Vivo' (si ya empezó) o 'Pre-Partido' (en las próximas 48h).
     Ignora eventos que están muy lejos en el futuro.
     """
+    # Manejar el formato Z para que datetime.fromisoformat funcione correctamente
     commence_time = datetime.fromisoformat(commence_time_str.replace('Z', '+00:00'))
     now_utc = datetime.now(timezone.utc)
     
@@ -152,6 +156,9 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx):
     """
     surebets_found = []
     api_key_depleted = False # Bandera para indicar si esta API key se agotó
+    error_message = None
+    remaining_requests = None
+    used_requests = None
     
     url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds"
     
@@ -167,19 +174,29 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx):
         response = requests.get(url, params=params, timeout=30) # Timeout de 30 segundos
         
         # --- Lógica de Manejo de Errores de la API ---
-        if response.status_code in [401, 402]:
-            api_key_depleted = True # Marcar la key como agotada
-            return surebets_found, api_key_depleted, None, None # Devuelve vacío y marca la key
+        if response.status_code == 401: # Unauthorized - API Key inválida
+            api_key_depleted = True
+            error_message = "API Key inválida o no autorizada."
+            return surebets_found, api_key_depleted, error_message, None, None
         
-        if response.status_code == 404:
-            # Puedes retornar un mensaje de error específico si lo necesitas
-            return surebets_found, api_key_depleted, "Error 404: URL no encontrada", None 
+        if response.status_code == 402: # Payment Required - Límite de créditos alcanzado
+            api_key_depleted = True
+            error_message = "Créditos de API Key agotados."
+            return surebets_found, api_key_depleted, error_message, None, None
         
-        if response.status_code == 422: 
-            # Puedes retornar un mensaje de error específico si lo necesitas
-            return surebets_found, api_key_depleted, "Error 422: Parámetros inválidos", None
+        if response.status_code == 404: # Not Found - Deporte o mercado no encontrado
+            error_message = f"Deporte o mercado '{sport_key}' no encontrado."
+            return surebets_found, api_key_depleted, error_message, None, None
+        
+        if response.status_code == 422: # Unprocessable Entity - Parámetros inválidos
+            error_message = f"Parámetros de solicitud inválidos para '{sport_key}'."
+            return surebets_found, api_key_depleted, error_message, None, None
+        
+        if response.status_code >= 500: # Server Error
+            error_message = f"Error del servidor API para '{sport_key}'. Código: {response.status_code}"
+            return surebets_found, api_key_depleted, error_message, None, None
 
-        response.raise_for_status() # Lanza una excepción para errores HTTP >= 400
+        response.raise_for_status() # Lanza una excepción para otros errores HTTP >= 400
         data = response.json()
         
         # Obtener información de uso de la API para devolverla
@@ -199,37 +216,47 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx):
                 home_team: {'price': 0, 'bookmaker': ''}, 
                 away_team: {'price': 0, 'bookmaker': ''}
             }
-            expected_outcomes = {home_team, away_team}
+            # Un conjunto de nombres de equipos para una verificación rápida
+            team_names = {home_team, away_team}
 
             for bookmaker in event['bookmakers']:
-                for market in bookmaker['markets']:
-                    if market['key'] == market_key:
-                        found_outcomes_for_bookmaker = set()
-                        current_bookmaker_outcomes = {}
-                        
-                        for outcome in market['outcomes']:
-                            outcome_name = outcome['name']
-                            price = outcome['price']
-                            
-                            if outcome_name in expected_outcomes:
-                                current_bookmaker_outcomes[outcome_name] = price
-                                found_outcomes_for_bookmaker.add(outcome_name)
-                        
-                        if found_outcomes_for_bookmaker == expected_outcomes:
-                            for outcome_key, price_val in current_bookmaker_outcomes.items():
-                                if price_val > best_odds[outcome_key]['price']:
-                                    best_odds[outcome_key]['price'] = price_val
-                                    best_odds[outcome_key]['bookmaker'] = bookmaker['title']
-                        break
+                # Asegurarse de que el bookmaker tenga el mercado H2H
+                h2h_market = next((m for m in bookmaker['markets'] if m['key'] == market_key), None)
+                if not h2h_market:
+                    continue # Saltar si la casa de apuestas no tiene el mercado H2H para este evento
 
+                # Recopilar las cuotas de esta casa para los resultados esperados
+                current_bookmaker_outcomes = {}
+                for outcome in h2h_market['outcomes']:
+                    outcome_name = outcome['name']
+                    price = outcome['price']
+                    
+                    if outcome_name in team_names:
+                        current_bookmaker_outcomes[outcome_name] = price
+                
+                # CRÍTICO: Asegurarse de que la casa de apuestas ofrezca cuotas para AMBOS lados del H2H
+                if home_team in current_bookmaker_outcomes and away_team in current_bookmaker_outcomes:
+                    # Si esta casa tiene cuotas para ambos, verificar si son las mejores hasta ahora
+                    if current_bookmaker_outcomes[home_team] > best_odds[home_team]['price']:
+                        best_odds[home_team]['price'] = current_bookmaker_outcomes[home_team]
+                        best_odds[home_team]['bookmaker'] = bookmaker['title']
+                    
+                    if current_bookmaker_outcomes[away_team] > best_odds[away_team]['price']:
+                        best_odds[away_team]['price'] = current_bookmaker_outcomes[away_team]
+                        best_odds[away_team]['bookmaker'] = bookmaker['title']
+            
+            # --- Cálculo de la Utilidad de la Surebet (solo con las mejores cuotas) ---
             odds1 = best_odds[home_team]['price']
             odds2 = best_odds[away_team]['price']
 
+            # Solo proceder si tenemos cuotas válidas y mayores a 0 para ambos resultados
             if odds1 > 0 and odds2 > 0:
                 utilidad = (1 - (1/odds1 + 1/odds2)) * 100
             else:
-                continue
+                continue # Saltar si no se pudieron obtener cuotas válidas para ambos lados H2H
 
+            # --- Filtrado de Surebets: Solo incluir oportunidades rentables ---
+            # Una utilidad > 0.01% asegura una ganancia real después de las apuestas.
             if utilidad > 0.01: 
                 surebets_found.append({
                     "Deporte": sport_name,
@@ -242,22 +269,22 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx):
                     "Selección 1": home_team,
                     "Mejor Cuota 1": odds1,
                     "Casa de Apuestas 1": best_odds[home_team]['bookmaker'],
-                    "Selección X": "N/A",
-                    "Mejor Cuota X": 1.01,
+                    "Selección X": "N/A", # No aplica para H2H
+                    "Mejor Cuota X": 1.01, # Valor por defecto para la calculadora si cambia de mercado
                     "Casa de Apuestas X": "N/A",
                     "Selección 2": away_team,
                     "Mejor Cuota 2": odds2,
                     "Casa de Apuestas 2": best_odds[away_team]['bookmaker'],
                 })
-        # Devolver las surebets, si la key se agotó, y la info de requests
-        return surebets_found, api_key_depleted, remaining_requests, used_requests
+        # Devolver las surebets, si la key se agotó, el mensaje de error y la info de requests
+        return surebets_found, api_key_depleted, error_message, remaining_requests, used_requests
 
     except requests.exceptions.RequestException as e:
-        # Devuelve un mensaje de error para que el hilo principal lo muestre
-        return [], api_key_depleted, f"Error de conexión/API: {e}", None 
+        error_message = f"Error de conexión o API para '{sport_name}': {e}"
+        return [], api_key_depleted, error_message, None, None 
     except Exception as e:
-        # Devuelve un mensaje de error general
-        return [], api_key_depleted, f"Error inesperado: {e}", None
+        error_message = f"Error inesperado en la tarea para '{sport_name}': {e}"
+        return [], api_key_depleted, error_message, None, None
 
 # --- Funciones de Cálculo de Surebets Manuales ---
 
@@ -296,7 +323,7 @@ def calcular_surebet_3_resultados(c_local, c_empate, c_visitante, presupuesto):
         
         ganancia = round(min(stake_local * c_local, stake_empate * c_empate, stake_visitante * c_visitante) - presupuesto)
         roi = round((1 - total_inv) * 100, 2)
-        return stake_local, stake_empate, stake_visitante, ganancia, roi, c_local, c_empate, c_v
+        return stake_local, stake_empate, stake_visitante, ganancia, roi, c_local, c_empate, c_visitante
     return None, None, None, None, None, None, None, None
 
 # --- Definición de Casas de Apuestas Predeterminadas por Divisa ---
@@ -345,12 +372,11 @@ with tab1:
             search_count = 0
 
             # Usar ThreadPoolExecutor para paralelizar las solicitudes API
-            # max_workers=5 es un buen número para solicitudes de red para evitar sobrecargar.
             with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
                 futures = {}
+                # PREPARACIÓN DE TAREAS: Asignar una API key a cada deporte antes de enviar la tarea
                 for sport_name in selected_sports:
-                    # Obtener la API Key de forma segura en el hilo principal
-                    api_key, api_key_idx = get_next_available_api_key_info_SAFE()
+                    api_key, api_key_idx = get_next_available_api_key_info()
                     if api_key is None:
                         st.error("❌ Todas las API Keys disponibles han agotado sus créditos o están marcadas como agotadas. Por favor, actualiza tus API Keys o espera el reseteo diario.")
                         break # Salir del bucle si no hay más keys activas
@@ -358,25 +384,24 @@ with tab1:
                     # Enviar la tarea al executor. La función find_surebets_task recibe la key y su índice.
                     futures[executor.submit(find_surebets_task, sport_name, SPORTS[sport_name], selected_market_key, api_key, api_key_idx)] = (sport_name, api_key, api_key_idx)
                 
-                # Procesar los resultados a medida que los futuros se completan
+                # PROCESAR RESULTADOS: A medida que los futuros se completan, manejar los resultados en el hilo principal
                 for future in concurrent.futures.as_completed(futures):
                     sport_name, used_api_key, used_api_key_idx = futures[future]
                     try:
-                        # Los resultados de find_surebets_task son: surebets_found, api_key_depleted, error_message, api_usage_info
-                        surebets_for_sport, key_depleted_in_thread, error_or_remaining, used_reqs = future.result() 
+                        # Los resultados de find_surebets_task son: surebets_found, api_key_depleted, error_message, remaining_requests, used_requests
+                        surebets_for_sport, key_depleted_in_thread, task_error_message, remaining_reqs, used_reqs = future.result() 
                         
                         # AHORA, en el HILO PRINCIPAL, actualizamos st.session_state y mostramos mensajes
                         if key_depleted_in_thread:
                             st.session_state.api_key_status[used_api_key] = False
                             if used_api_key not in st.session_state.depleted_api_keys:
                                 st.session_state.depleted_api_keys.append(used_api_key)
-                            st.warning(f"⚠️ La API Key #{used_api_key_idx} (termina en {used_api_key[-4:]}) parece haber agotado sus créditos. Saltando a la siguiente.")
-                        elif error_or_remaining and not isinstance(error_or_remaining, str):
-                            # Si no hay error y es info de requests, mostrar en sidebar
-                            st.sidebar.info(f"API Key #{used_api_key_idx} (usando {used_api_key[-4:]}..) | Usados: {used_reqs} | Restantes: {error_or_remaining}")
-                        elif isinstance(error_or_remaining, str):
-                             # Si es un string, es un mensaje de error de la tarea
-                            st.error(f"Error para '{sport_name}' con API Key {used_api_key_idx} ({used_api_key[-4:]}): {error_or_remaining}")
+                            st.warning(f"⚠️ La API Key #{used_api_key_idx} (termina en {used_api_key[-4:]}) parece haber agotado sus créditos. Error: {task_error_message}")
+                        elif task_error_message:
+                            st.error(f"Error para '{sport_name}' con API Key {used_api_key_idx} ({used_api_key[-4:]}): {task_error_message}")
+                        else:
+                            # Mostrar información de uso de la API en la barra lateral para la key usada
+                            st.sidebar.info(f"API Key #{used_api_key_idx} (usando {used_api_key[-4:]}..) | Usados: {used_reqs} | Restantes: {remaining_reqs}")
 
                         if surebets_for_sport:
                             all_surebets.extend(surebets_for_sport)
@@ -626,7 +651,7 @@ with tab2:
   - Cuota: {top_surebet['apuesta2_cuota']}
   - **Apostar: ${top_surebet['apuesta2_stake']:,d} {moneda}**
 - **{top_surebet['apuesta3_casa']}** (para **{top_surebet['apuesta3_rol']}**):
-  - Cuota: {top_surebet['aputa3_cuota']}
+  - Cuota: {top_surebet['apuesta3_cuota']}
   - **Apostar: ${top_surebet['apuesta3_stake']:,d} {moneda}**
 """)
             
@@ -642,11 +667,25 @@ st.sidebar.markdown("---")
 st.sidebar.header("Información de API")
 st.sidebar.write(f"Total de API Keys disponibles: **{len(API_KEYS)}**")
 
-next_key_to_use, next_key_idx_to_use = get_next_available_api_key_info_SAFE()
-if next_key_to_use:
-    st.sidebar.info(f"Próxima API Key a usar: #{next_key_idx_to_use} (termina en **{next_key_to_use[-4:]}**)")
+# Mostrar la próxima API Key a usar sin consumirla
+# Se obtiene de nuevo porque la función `get_next_available_api_key_info()` avanza el índice.
+# Esto asegura que el display siempre muestre la siguiente key que *será* usada.
+temp_key_idx = st.session_state.api_key_index
+temp_key = API_KEYS[temp_key_idx] if API_KEYS else None
+if st.session_state.api_key_status.get(temp_key, False): # Verificar si la clave es activa para mostrarla como "próxima"
+    st.sidebar.info(f"Próxima API Key a usar: #{temp_key_idx} (termina en **{temp_key[-4:]}**)")
 else:
-    st.sidebar.warning("🚫 No quedan API Keys activas para usar. Por favor, actualiza o espera el reseteo.")
+    # Si la clave en el índice actual no está activa, buscar la primera activa para mostrarla como "próxima"
+    found_active_for_display = False
+    for i in range(len(API_KEYS)):
+        display_key_idx = (temp_key_idx + i) % len(API_KEYS)
+        display_key = API_KEYS[display_key_idx]
+        if st.session_state.api_key_status.get(display_key, False):
+            st.sidebar.info(f"Próxima API Key a usar: #{display_key_idx} (termina en **{display_key[-4:]}**)")
+            found_active_for_display = True
+            break
+    if not found_active_for_display:
+        st.sidebar.warning("🚫 No quedan API Keys activas para usar. Por favor, actualiza o espera el reseteo.")
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("Claves API Agotadas")
