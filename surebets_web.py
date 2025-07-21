@@ -115,21 +115,21 @@ def get_next_available_api_key_info():
     """
     initial_index = st.session_state.api_key_index
     num_keys = len(API_KEYS)
-    
+
     # Intentar encontrar una clave activa en el rango actual
     for _ in range(num_keys): # Iterar a través de todas las claves si es necesario
         current_key_index = st.session_state.api_key_index
         current_key = API_KEYS[current_key_index]
-        
+
         # Verificar si la clave actual está activa
         if st.session_state.api_key_status.get(current_key, True):
             # Si está activa, avanzamos el índice para la próxima vez y la devolvemos
             st.session_state.api_key_index = (current_key_index + 1) % num_keys
             return current_key, current_key_index
-        
+
         # Si la clave actual no está activa, simplemente avanzamos al siguiente índice
         st.session_state.api_key_index = (current_key_index + 1) % num_keys
-        
+
         # Si hemos dado una vuelta completa y no encontramos ninguna clave activa, salimos
         if st.session_state.api_key_index == initial_index:
             break
@@ -144,7 +144,7 @@ def get_event_status(commence_time_str, min_hours_ahead, max_hours_ahead):
     # Manejar el formato Z para que datetime.fromisoformat funcione correctamente
     commence_time = datetime.fromisoformat(commence_time_str.replace('Z', '+00:00'))
     now_utc = datetime.now(timezone.utc)
-    
+
     if commence_time <= now_utc: # Excluir eventos que ya han comenzado (En Vivo)
         return None
     elif now_utc + timedelta(hours=min_hours_ahead) <= commence_time <= now_utc + timedelta(hours=max_hours_ahead):
@@ -164,9 +164,9 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx, 
     error_message = None
     remaining_requests = None
     used_requests = None
-    
+
     url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds"
-    
+
     params = {
         "apiKey": api_key,
         "regions": "us,eu,uk,au", # Regiones de casas de apuestas a consultar
@@ -174,36 +174,36 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx, 
         "oddsFormat": "decimal",
         "bookmakers": "all" # Busca en todas las casas disponibles para el deporte
     }
-    
+
     try:
         response = requests.get(url, params=params, timeout=30) # Timeout de 30 segundos
-        
+
         # --- Lógica de Manejo de Errores de la API ---
         if response.status_code == 401: # Unauthorized - API Key inválida
             api_key_depleted = True
             error_message = "API Key inválida o no autorizada."
             return surebets_found, api_key_depleted, error_message, None, None
-        
+
         if response.status_code == 402: # Payment Required - Límite de créditos alcanzado
             api_key_depleted = True
             error_message = "Créditos de API Key agotados."
             return surebets_found, api_key_depleted, error_message, None, None
-        
+
         if response.status_code == 404: # Not Found - Deporte o mercado no encontrado
             error_message = f"Deporte o mercado '{sport_key}' no encontrado."
             return surebets_found, api_key_depleted, error_message, None, None
-        
+
         if response.status_code == 422: # Unprocessable Entity - Parámetros inválidos
             error_message = f"Parámetros de solicitud inválidos para '{sport_key}'. Verifica que la combinación deporte/mercado sea válida."
             return surebets_found, api_key_depleted, error_message, None, None
-        
+
         if response.status_code >= 500: # Server Error
             error_message = f"Error del servidor API para '{sport_key}'. Código: {response.status_code}"
             return surebets_found, api_key_depleted, error_message, None, None
 
         response.raise_for_status() # Lanza una excepción para otros errores HTTP >= 400
         data = response.json()
-        
+
         # Obtener información de uso de la API para devolverla
         remaining_requests = response.headers.get('x-requests-remaining', 'N/A')
         used_requests = response.headers.get('x-requests-used', 'N/A')
@@ -217,7 +217,7 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx, 
 
             home_team = event['home_team']
             away_team = event['away_team']
-            
+
             # Lógica para H2H (Moneyline/1x2 para fútbol)
             if market_key == "h2h":
                 best_odds = {
@@ -236,16 +236,16 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx, 
                     for outcome in h2h_market['outcomes']:
                         outcome_name = outcome['name']
                         price = outcome['price']
-                        
+
                         # Actualizar la mejor cuota si es superior para el resultado específico
                         if outcome_name in outcome_names_to_check and price > best_odds[outcome_name]['price']:
                             best_odds[outcome_name]['price'] = price
                             best_odds[outcome_name]['bookmaker'] = bookmaker['title']
-                
+
                 odds_home = best_odds[home_team]['price']
                 odds_draw = best_odds['Draw']['price']
                 odds_away = best_odds[away_team]['price']
-                
+
                 # Verificar que tenemos cuotas válidas para los 3 resultados
                 # y que provienen de al menos dos casas de apuestas distintas
                 if odds_home > 0 and odds_draw > 0 and odds_away > 0:
@@ -257,7 +257,7 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx, 
                     # Si todas las cuotas provienen de la misma casa, o alguna no tiene bookmaker (precio 0.0), no es surebet.
                     if len(bookmakers_involved) < 2 or any(bm == '' for bm in bookmakers_involved):
                         continue # No es una surebet válida si no hay al menos 2 casas distintas o faltan datos
-                        
+
                     utilidad = (1 - (1/odds_home + 1/odds_draw + 1/odds_away)) * 100
                 else:
                     continue # No hay cuotas completas para 1x2
@@ -290,7 +290,7 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx, 
                     totals_market = next((m for m in bookmaker['markets'] if m['key'] == market_key), None)
                     if not totals_market:
                         continue
-                    
+
                     for outcome in totals_market['outcomes']:
                         point = outcome['point']
                         name = outcome['name'] # 'Over' or 'Under'
@@ -298,14 +298,14 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx, 
 
                         if point not in best_totals_odds:
                             best_totals_odds[point] = {'over': {'price': 0, 'bookmaker': ''}, 'under': {'price': 0, 'bookmaker': ''}}
-                        
+
                         if name.lower() == 'over' and price > best_totals_odds[point]['over']['price']:
                             best_totals_odds[point]['over']['price'] = price
                             best_totals_odds[point]['over']['bookmaker'] = bookmaker['title']
                         elif name.lower() == 'under' and price > best_totals_odds[point]['under']['price']:
                             best_totals_odds[point]['under']['price'] = price
                             best_totals_odds[point]['under']['bookmaker'] = bookmaker['title']
-                
+
                 for point, odds_data in best_totals_odds.items():
                     over_odds = odds_data['over']['price']
                     under_odds = odds_data['under']['price']
@@ -315,7 +315,7 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx, 
                         bookmakers_involved = {odds_data['over']['bookmaker'], odds_data['under']['bookmaker']}
                         if len(bookmakers_involved) < 2 or any(bm == '' for bm in bookmakers_involved):
                             continue # No es una surebet válida si no hay 2 casas distintas o faltan datos
-                            
+
                         utilidad = (1 - (1/over_odds + 1/under_odds)) * 100
                     else:
                         continue
@@ -348,7 +348,7 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx, 
                     spreads_market = next((m for m in bookmaker['markets'] if m['key'] == market_key), None)
                     if not spreads_market:
                         continue
-                    
+
                     for outcome in spreads_market['outcomes']:
                         point = outcome['point']
                         name = outcome['name'] # Nombre del equipo
@@ -362,7 +362,7 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx, 
                                 'home_spread': {'price': 0, 'bookmaker': '', 'point': None}, 
                                 'away_spread': {'price': 0, 'bookmaker': '', 'point': None}
                             }
-                        
+
                         if name == home_team:
                             if price > best_spreads_odds[normalized_point]['home_spread']['price']:
                                 best_spreads_odds[normalized_point]['home_spread']['price'] = price
@@ -373,7 +373,7 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx, 
                                 best_spreads_odds[normalized_point]['away_spread']['price'] = price
                                 best_spreads_odds[normalized_point]['away_spread']['bookmaker'] = bookmaker['title']
                                 best_spreads_odds[normalized_point]['away_spread']['point'] = point # Guardar el punto original del hándicap
-                
+
                 for normalized_point, odds_data in best_spreads_odds.items():
                     home_spread_odds = odds_data['home_spread']['price']
                     away_spread_odds = odds_data['away_spread']['price']
@@ -386,7 +386,7 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx, 
                         bookmakers_involved = {odds_data['home_spread']['bookmaker'], odds_data['away_spread']['bookmaker']}
                         if len(bookmakers_involved) < 2 or any(bm == '' for bm in bookmakers_involved):
                             continue # No es una surebet válida si no hay 2 casas distintas o faltan datos
-                            
+
                         utilidad = (1 - (1/home_spread_odds + 1/away_spread_odds)) * 100
                     else:
                         continue
@@ -427,7 +427,7 @@ def calcular_surebet_2_resultados(c1_local, c2_visit, presupuesto):
     """Calcula surebet para 2 resultados (Local/Visitante o Jugador1/Jugador2)."""
     if c1_local <= 1.01 or c2_visit <= 1.01: # Cuotas mínimas para evitar divisiones por cero o cuotas irreales
         return None, None, None, None, None, None
-    
+
     inv1 = 1 / c1_local
     inv2 = 1 / c2_visit
     total_inv = inv1 + inv2
@@ -435,7 +435,7 @@ def calcular_surebet_2_resultados(c1_local, c2_visit, presupuesto):
     if total_inv < 1: # Si la suma de las inversas de las cuotas es menor a 1, hay una surebet
         stake1 = round((inv1 / total_inv) * presupuesto)
         stake2 = round((inv2 / total_inv) * presupuesto)
-        
+
         # Calcular la ganancia mínima garantizada
         ganancia = round(min(stake1 * c1_local, stake2 * c2_visit) - presupuesto)
         roi = round((1 - total_inv) * 100, 2)
@@ -446,7 +446,7 @@ def calcular_surebet_3_resultados(c_local, c_empate, c_visitante, presupuesto):
     """Calcula surebet para 3 resultados (Local/Empate/Visitante)."""
     if c_local <= 1.01 or c_empate <= 1.01 or c_visitante <= 1.01:
         return None, None, None, None, None, None, None, None
-    
+
     inv_local = 1 / c_local
     inv_empate = 1 / c_empate
     inv_visitante = 1 / c_visitante
@@ -456,7 +456,7 @@ def calcular_surebet_3_resultados(c_local, c_empate, c_visitante, presupuesto):
         stake_local = round((inv_local / total_inv) * presupuesto)
         stake_empate = round((inv_empate / total_inv) * presupuesto)
         stake_visitante = round((inv_visitante / total_inv) * presupuesto)
-        
+
         # Calcular la ganancia mínima garantizada
         ganancia = round(min(stake_local * c_local, stake_empate * c_empate, stake_visitante * c_visitante) - presupuesto)
         roi = round((1 - total_inv) * 100, 2)
@@ -512,7 +512,7 @@ with tab1:
         value=72,
         step=12
     )
-    
+
     # Mostrar el conteo de API Keys disponibles y agotadas
     active_keys_count = sum(1 for status in st.session_state.api_key_status.values() if status)
     depleted_keys_count = len(st.session_state.depleted_api_keys)
@@ -529,7 +529,7 @@ with tab1:
             results_placeholder = st.empty() # Placeholder para mostrar los resultados
             progress_bar = st.progress(0) # Barra de progreso de la búsqueda
             status_text = st.empty() # Texto de estado de la búsqueda
-            
+
             all_surebets = []
             total_searches = len(selected_sports) 
             search_count = 0
@@ -543,17 +543,17 @@ with tab1:
                     if api_key is None:
                         st.error("❌ Todas las API Keys disponibles han agotado sus créditos o están marcadas como agotadas. Por favor, actualiza tus API Keys o espera el reseteo diario.")
                         break # Salir del bucle si no hay más keys activas
-                    
+
                     # Enviar la tarea al executor. La función find_surebets_task recibe la key y su índice.
                     futures[executor.submit(find_surebets_task, sport_name, SPORTS[sport_name], selected_market_key, api_key, api_key_idx, min_hours_ahead, max_hours_ahead)] = (sport_name, api_key, api_key_idx)
-                
+
                 # PROCESAR RESULTADOS: A medida que los futuros se completan, manejar los resultados en el hilo principal
                 for future in concurrent.futures.as_completed(futures):
                     sport_name, used_api_key, used_api_key_idx = futures[future]
                     try:
                         # Los resultados de find_surebets_task son: surebets_found, api_key_depleted, error_message, remaining_requests, used_requests
                         surebets_for_sport, key_depleted_in_thread, task_error_message, remaining_reqs, used_reqs = future.result() 
-                        
+
                         # AHORA, en el HILO PRINCIPAL, actualizamos st.session_state y mostramos mensajes
                         if key_depleted_in_thread:
                             st.session_state.api_key_status[used_api_key] = False
@@ -569,16 +569,16 @@ with tab1:
 
                         if surebets_for_sport:
                             all_surebets.extend(surebets_for_sport)
-                        
+
                         search_count += 1
                         progress = search_count / total_searches if total_searches > 0 else 1
                         progress_bar.progress(progress)
                         status_text.text(f"Completado: **{sport_name}**. Procesando... {search_count}/{total_searches}")
-                        
+
                     except Exception as exc:
                         # Captura cualquier otro error inesperado que pueda ocurrir al procesar el resultado del futuro
                         st.error(f"Error inesperado al procesar los resultados de '{sport_name}': {exc}. Por favor, revisa los logs.")
-                        
+
             # --- FIN DE LA LÓGICA DE PARALELIZACIÓN ---
 
             # Mensaje final al terminar todas las búsquedas
@@ -594,19 +594,19 @@ with tab1:
                         st.warning(f"No se encontraron surebets para los deportes y mercado '{selected_market_name}' seleccionados, en el rango de {min_hours_ahead} a {max_hours_ahead} horas de antelación.")
                 else:
                     st.success(f"¡Se encontraron **{len(all_surebets)}** oportunidades de surebet!")
-                    
+
                     df = pd.DataFrame(all_surebets)
-                    
+
                     st.subheader("Resultados de Surebets Encontradas")
                     st.info("Haz clic en 'Cargar en Calculadora' para llevar los datos de una surebet específica a la calculadora manual.")
-                    
+
                     # Mostrar resultados individuales con botón para cargar en calculadora
                     for i, row in df.iterrows():
                         col1, col2 = st.columns([0.8, 0.2])
                         with col1:
                             st.markdown(f"**Evento:** {row['Evento']} | **Deporte:** {row['Deporte']} | **Liga:** {row['Liga/Torneo']} | **Fecha:** {row['Fecha (UTC)']}")
                             st.markdown(f"**Mercado:** {row['Mercado']} | **Utilidad:** **<span style='color:green; font-size:1.1em;'>{row['Utilidad (%)']}</span>**", unsafe_allow_html=True)
-                            
+
                             # Formato específico para H2H (1x2), Totals o Spreads
                             if row['Mercado'] == "Ganador (1x2)":
                                 st.markdown(f"**{row['Selección 1']}:** {row['Mejor Cuota 1']} ({row['Casa de Apuestas 1']})")
@@ -645,7 +645,7 @@ with tab2:
         st.subheader("Detalles del Evento")
         st.text_input("Evento", value=st.session_state.calc_event_data['Evento'], key="manual_evento")
         st.text_input("Fecha (UTC)", value=st.session_state.calc_event_data['Fecha (UTC)'], key="manual_fecha")
-        
+
         # Selección de tipo de mercado para la calculadora
         # Determinar el índice inicial basado en el mercado cargado
         initial_calc_market_index = 0
@@ -662,9 +662,9 @@ with tab2:
             index=initial_calc_market_index,
             key="calc_market_type"
         )
-        
+
         presupuesto = st.number_input("Presupuesto total para la apuesta (ej: 100000 COP):", min_value=1000, value=100000, step=10000, format="%d")
-        
+
         # Selección de divisa
         moneda_seleccionada = st.selectbox(
             "Selecciona la divisa para las casas de apuestas:",
@@ -672,7 +672,7 @@ with tab2:
             index=list(casas_predefinidas_manual.keys()).index(st.session_state.last_moneda_manual),
             key="calc_currency"
         )
-        
+
         # Si la moneda cambia, actualiza las casas predeterminadas
         if moneda_seleccionada != st.session_state.last_moneda_manual:
             st.session_state.nombres_casas_manual = casas_predefinidas_manual[moneda_seleccionada]
@@ -681,7 +681,7 @@ with tab2:
             st.session_state.cuotas_visitante_manual = [1.01] * len(st.session_state.nombres_casas_manual)
             st.session_state.last_moneda_manual = moneda_seleccionada # Actualiza la última moneda seleccionada
             st.experimental_rerun() # Rerun para que los campos se actualicen
-            
+
         # Cuotas de la surebet cargada se inicializan aquí
         # La lógica para 'default_cuota_empate', 'default_sel_empate', 'default_casa_empate'
         # dependerá del 'calc_market_option' que el usuario seleccione.
@@ -704,11 +704,11 @@ with tab2:
             st.text_input("Nombre Equipo Local / Selección 1", value=default_sel_local, key="manual_sel1")
             cuota_local = st.number_input("Mejor Cuota Local:", min_value=1.01, value=default_cuota_local, step=0.01, format="%.2f", key="manual_cuota_local")
             st.text_input("Casa de Apuestas Local:", value=default_casa_local, key="manual_casa_local")
-            
+
             st.text_input("Nombre Empate / Selección X", value=default_sel_empate, key="manual_selX")
             cuota_empate = st.number_input("Mejor Cuota Empate:", min_value=1.01, value=default_cuota_empate, step=0.01, format="%.2f", key="manual_cuota_empate")
             st.text_input("Casa de Apuestas Empate:", value=default_casa_empate, key="manual_casa_empate")
-            
+
             st.text_input("Nombre Equipo Visitante / Selección 2", value=default_sel_visitante, key="manual_sel2")
             cuota_visitante = st.number_input("Mejor Cuota Visitante:", min_value=1.01, value=default_cuota_visitante, step=0.01, format="%.2f", key="manual_cuota_visitante")
             st.text_input("Casa de Apuestas Visitante:", value=default_casa_visitante, key="manual_casa_visitante")
@@ -717,7 +717,7 @@ with tab2:
                 # Para la calculadora manual, asumimos que el usuario sabe lo que hace y no validamos casas distintas aquí.
                 stake_local, stake_empate, stake_visitante, ganancia, roi, c_local, c_empate, c_visitante = \
                     calcular_surebet_3_resultados(cuota_local, cuota_empate, cuota_visitante, presupuesto)
-                
+
                 if roi is not None:
                     st.success(f"¡Surebet encontrada! ROI: **{roi:.2f}%**")
                     st.write(f"**Apostar {moneda_seleccionada} {stake_local:,}** en **{st.session_state.manual_sel1}** (Cuota: {c_local}) en **{st.session_state.manual_casa_local}**")
@@ -739,7 +739,7 @@ with tab2:
             if st.button("Calcular Surebet 2 Resultados"):
                 # Para la calculadora manual, asumimos que el usuario sabe lo que hace y no validamos casas distintas aquí.
                 stake1, stake2, ganancia, roi, c1, c2 = calcular_surebet_2_resultados(cuota_local, cuota_visitante, presupuesto)
-                
+
                 if roi is not None:
                     st.success(f"¡Surebet encontrada! ROI: **{roi:.2f}%**")
                     st.write(f"**Apostar {moneda_seleccionada} {stake1:,}** en **{st.session_state.manual_sel1_2}** (Cuota: {c1}) en **{st.session_state.manual_casa_local_2}**")
