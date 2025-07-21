@@ -20,6 +20,8 @@ Esta aplicación **detecta oportunidades de surebets (arbitraje deportivo)** en 
 # --- Lista de API Keys (incluyendo las 50 proporcionadas) ---
 # Es crucial mantener estas keys actualizadas y con créditos.
 # Si tus keys se agotan, la aplicación no funcionará correctamente.
+# NOTA: Por seguridad, en un entorno de producción real, estas keys NO deberían estar hardcodeadas aquí.
+# Se recomienda usar variables de entorno (secrets) de Streamlit o un servicio de gestión de secretos.
 API_KEYS = [
     "734f30d0866696cf90d5029ac106cfba", "10fb6d9d7b3240906d0acea646068535",
     "a9ff72549c4910f1fa9659e175a35cc0", "25e9d8872877f5110254ff6ef42056c6",
@@ -48,7 +50,7 @@ API_KEYS = [
     "6f74a75a76f42fabaa815c4461c59980", "86de2f86b0b628024ef6d5546b479c0f"
 ]
 
-# --- Diccionario de Deportes de Interés (Solo los especificados) ---
+# --- Diccionario de Deportes de Interés ---
 SPORTS = {
     "Fútbol": "soccer",
     "Baloncesto": "basketball",
@@ -56,7 +58,7 @@ SPORTS = {
     "Béisbol": "baseball_mlb",
 }
 
-# --- Diccionario de Mercados Disponibles (Ampliados) ---
+# --- Diccionario de Mercados Disponibles (Ampliados para la API) ---
 MARKETS = {
     "Ganador (Moneyline/H2H)": "h2h",
     "Totales (Over/Under)": "totals",
@@ -232,17 +234,18 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx, 
                     for outcome in h2h_market['outcomes']:
                         outcome_name = outcome['name']
                         price = outcome['price']
+                        # Asegúrate de que el nombre del resultado sea uno de los equipos
                         if outcome_name in team_names:
                             current_bookmaker_outcomes[outcome_name] = price
                     
-                    if home_team in current_bookmaker_outcomes and away_team in current_bookmaker_outcomes:
-                        if current_bookmaker_outcomes[home_team] > best_odds[home_team]['price']:
-                            best_odds[home_team]['price'] = current_bookmaker_outcomes[home_team]
-                            best_odds[home_team]['bookmaker'] = bookmaker['title']
-                        
-                        if current_bookmaker_outcomes[away_team] > best_odds[away_team]['price']:
-                            best_odds[away_team]['price'] = current_bookmaker_outcomes[away_team]
-                            best_odds[away_team]['bookmaker'] = bookmaker['title']
+                    # Actualizar las mejores cuotas para cada equipo
+                    if home_team in current_bookmaker_outcomes and current_bookmaker_outcomes[home_team] > best_odds[home_team]['price']:
+                        best_odds[home_team]['price'] = current_bookmaker_outcomes[home_team]
+                        best_odds[home_team]['bookmaker'] = bookmaker['title']
+                    
+                    if away_team in current_bookmaker_outcomes and current_bookmaker_outcomes[away_team] > best_odds[away_team]['price']:
+                        best_odds[away_team]['price'] = current_bookmaker_outcomes[away_team]
+                        best_odds[away_team]['bookmaker'] = bookmaker['title']
                 
                 odds1 = best_odds[home_team]['price']
                 odds2 = best_odds[away_team]['price']
@@ -252,7 +255,7 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx, 
                 else:
                     continue
 
-                if utilidad > 0.01: 
+                if utilidad > 0.01: # Solo surebets con utilidad positiva
                     surebets_found.append({
                         "Deporte": sport_name,
                         "Liga/Torneo": event['sport_title'],
@@ -264,8 +267,8 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx, 
                         "Selección 1": home_team,
                         "Mejor Cuota 1": odds1,
                         "Casa de Apuestas 1": best_odds[home_team]['bookmaker'],
-                        "Selección X": "N/A", 
-                        "Mejor Cuota X": 1.01, 
+                        "Selección X": "N/A", # No aplica para 2 resultados
+                        "Mejor Cuota X": 1.01, # Valor neutro
                         "Casa de Apuestas X": "N/A",
                         "Selección 2": away_team,
                         "Mejor Cuota 2": odds2,
@@ -274,7 +277,6 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx, 
 
             # Lógica para Totales (Over/Under)
             elif market_key == "totals":
-                # Agrupar cuotas por 'point' (línea de total)
                 best_totals_odds = {} # {point: {'over': {'price': X, 'bookmaker': Y}, 'under': {'price': A, 'bookmaker': B}}}
 
                 for bookmaker in event['bookmakers']:
@@ -328,8 +330,7 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx, 
 
             # Lógica para Spreads (Hándicap)
             elif market_key == "spreads":
-                # Agrupar cuotas por 'point' (línea de hándicap)
-                best_spreads_odds = {} # {point: {'home_team_spread': {'price': X, 'bookmaker': Y}, 'away_team_spread': {'price': A, 'bookmaker': B}}}
+                best_spreads_odds = {} # {point: {'home_spread': {'price': X, 'bookmaker': Y, 'point': P_H}, 'away_spread': {'price': A, 'bookmaker': B, 'point': P_A}}}
 
                 for bookmaker in event['bookmakers']:
                     spreads_market = next((m for m in bookmaker['markets'] if m['key'] == market_key), None)
@@ -341,15 +342,7 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx, 
                         name = outcome['name'] # Nombre del equipo
                         price = outcome['price']
 
-                        # La API devuelve el hándicap para el equipo.
-                        # Necesitamos encontrar la cuota opuesta para el mismo 'point'.
-                        # Por ejemplo, si es -1.5 para el local, es +1.5 para el visitante.
-                        # O si un equipo tiene -7.5, el otro tendrá +7.5.
-                        # La clave para la surebet está en el 'point' y el 'name' (equipo).
-
-                        # Normalizar el 'point' para que sea el mismo para ambos lados del spread
-                        # Por ejemplo, si es -1.5 para el local, es +1.5 para el visitante.
-                        # Usamos el valor absoluto del punto como clave para agrupar.
+                        # Normalizar el 'point' usando su valor absoluto como clave para agrupar spreads opuestos
                         normalized_point = abs(point)
 
                         if normalized_point not in best_spreads_odds:
@@ -362,12 +355,12 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx, 
                             if price > best_spreads_odds[normalized_point]['home_spread']['price']:
                                 best_spreads_odds[normalized_point]['home_spread']['price'] = price
                                 best_spreads_odds[normalized_point]['home_spread']['bookmaker'] = bookmaker['title']
-                                best_spreads_odds[normalized_point]['home_spread']['point'] = point # Guardar el punto original
+                                best_spreads_odds[normalized_point]['home_spread']['point'] = point # Guardar el punto original del hándicap
                         elif name == away_team:
                             if price > best_spreads_odds[normalized_point]['away_spread']['price']:
                                 best_spreads_odds[normalized_point]['away_spread']['price'] = price
                                 best_spreads_odds[normalized_point]['away_spread']['bookmaker'] = bookmaker['title']
-                                best_spreads_odds[normalized_point]['away_spread']['point'] = point # Guardar el punto original
+                                best_spreads_odds[normalized_point]['away_spread']['point'] = point # Guardar el punto original del hándicap
                 
                 for normalized_point, odds_data in best_spreads_odds.items():
                     home_spread_odds = odds_data['home_spread']['price']
@@ -375,7 +368,7 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx, 
                     home_point = odds_data['home_spread']['point']
                     away_point = odds_data['away_spread']['point']
 
-                    # Asegurarse de que tenemos cuotas para ambos lados del spread y que los puntos son opuestos
+                    # Asegurarse de que tenemos cuotas para ambos lados del spread y que los puntos son opuestos y válidos
                     if home_spread_odds > 0 and away_spread_odds > 0 and home_point is not None and away_point is not None and home_point == -away_point:
                         utilidad = (1 - (1/home_spread_odds + 1/away_spread_odds)) * 100
                     else:
@@ -426,6 +419,7 @@ def calcular_surebet_2_resultados(c1_local, c2_visit, presupuesto):
         stake1 = round((inv1 / total_inv) * presupuesto)
         stake2 = round((inv2 / total_inv) * presupuesto)
         
+        # Calcular la ganancia mínima garantizada
         ganancia = round(min(stake1 * c1_local, stake2 * c2_visit) - presupuesto)
         roi = round((1 - total_inv) * 100, 2)
         return stake1, stake2, ganancia, roi, c1_local, c2_visit
@@ -446,6 +440,7 @@ def calcular_surebet_3_resultados(c_local, c_empate, c_visitante, presupuesto):
         stake_empate = round((inv_empate / total_inv) * presupuesto)
         stake_visitante = round((inv_visitante / total_inv) * presupuesto)
         
+        # Calcular la ganancia mínima garantizada
         ganancia = round(min(stake_local * c_local, stake_empate * c_empate, stake_visitante * c_visitante) - presupuesto)
         roi = round((1 - total_inv) * 100, 2)
         return stake_local, stake_empate, stake_visitante, ganancia, roi, c_local, c_empate, c_visitante
@@ -489,7 +484,7 @@ with tab1:
     st.sidebar.subheader("Filtro de Tiempo de Eventos (Pre-Partido)")
     min_hours_ahead = st.sidebar.radio(
         "Mostrar eventos con al menos esta antelación:",
-        options=[6, 12],
+        options=[6, 12, 24], # Añadida opción de 24 horas
         index=0, # Por defecto 6 horas
         format_func=lambda x: f"{x} horas"
     )
@@ -586,11 +581,10 @@ with tab1:
                             st.markdown(f"**Evento:** {row['Evento']} | **Deporte:** {row['Deporte']} | **Liga:** {row['Liga/Torneo']} | **Fecha:** {row['Fecha (UTC)']}")
                             st.markdown(f"**Mercado:** {row['Mercado']} | **Utilidad:** **{row['Utilidad (%)']}**")
                             # Formato específico para H2H, Totales o Spreads
-                            if "Selección 2" in row and row["Selección 2"] != "N/A":
+                            if "Selección X" in row and row["Selección X"] != "N/A": # Si hay 3 selecciones
+                                st.markdown(f"**{row['Selección 1']}:** {row['Mejor Cuota 1']} ({row['Casa de Apuestas 1']}) | **{row['Selección X']}:** {row['Mejor Cuota X']} ({row['Casa de Apuestas X']}) | **{row['Selección 2']}:** {row['Mejor Cuota 2']} ({row['Casa de Apuestas 2']})")
+                            else: # Para 2 selecciones (H2H, Totals, Spreads)
                                 st.markdown(f"**{row['Selección 1']}:** {row['Mejor Cuota 1']} ({row['Casa de Apuestas 1']}) | **{row['Selección 2']}:** {row['Mejor Cuota 2']} ({row['Casa de Apuestas 2']})")
-                            else: # En caso de que se necesite un formato más genérico si hay mercados con más de 2 selecciones
-                                st.markdown(f"**Cuota 1:** {row['Mejor Cuota 1']} ({row['Casa de Apuestas 1']})")
-                                # Puedes añadir más selecciones si los mercados lo requieren
                         with col2:
                             if st.button("Cargar en Calculadora", key=f"load_surebet_{i}"):
                                 # Cargar datos en el estado de sesión para la calculadora
@@ -599,12 +593,12 @@ with tab1:
                                     'Fecha (UTC)': row['Fecha (UTC)'],
                                     'Mercado': row['Mercado'], 
                                     'Cuota Local': row['Mejor Cuota 1'],
-                                    'Cuota Empate': 1.01, # Resetear para H2H/Totales/Spreads cargado (si no aplica)
+                                    'Cuota Empate': row['Mejor Cuota X'] if "Mejor Cuota X" in row else 1.01, # Si existe 'Mejor Cuota X', úsala, sino 1.01
                                     'Cuota Visitante': row['Mejor Cuota 2'],
                                     'Selección 1': row['Selección 1'],
                                     'Selección 2': row['Selección 2'],
                                     'Casa Local': row['Casa de Apuestas 1'],
-                                    'Casa Empate': 'N/A', # Resetear para H2H/Totales/Spreads cargado
+                                    'Casa Empate': row['Casa de Apuestas X'] if "Casa de Apuestas X" in row else 'N/A',
                                     'Casa Visitante': row['Casa de Apuestas 2']
                                 }
                                 # Precargar la primera posición de la calculadora manual con los datos
@@ -612,9 +606,15 @@ with tab1:
                                 st.session_state.nombres_casas_manual[0] = row['Casa de Apuestas 1']
                                 st.session_state.cuotas_visitante_manual[0] = row['Mejor Cuota 2']
                                 st.session_state.nombres_casas_manual[1] = row['Casa de Apuestas 2'] 
-                                # Asegurar que los campos de empate se reseteen si se cambia a H2H/Totales/Spreads
-                                st.session_state.cuotas_empate_manual[0] = 1.01
-                                st.session_state.nombres_casas_manual[2] = "N/A"
+                                
+                                # Si es un mercado de 3 resultados, cargar la cuota de empate
+                                if "Mejor Cuota X" in row and row["Mejor Cuota X"] != 1.01:
+                                    st.session_state.cuotas_empate_manual[0] = row['Mejor Cuota X']
+                                    st.session_state.nombres_casas_manual[2] = row['Casa de Apuestas X'] if "Casa de Apuestas X" in row else 'N/A'
+                                else: # Si se carga un mercado de 2 resultados, asegúrate de que el empate esté en su valor neutro
+                                     st.session_state.cuotas_empate_manual[0] = 1.01
+                                     st.session_state.nombres_casas_manual[2] = "N/A" # Resetear nombre de casa de empate
+
 
                                 st.toast("Evento cargado en la calculadora. ¡Dirígete a la pestaña 'Calculadora Manual' para ajustar y calcular!")
                                 st.rerun() # Recargar la página para que la calculadora muestre los datos
@@ -638,8 +638,18 @@ with tab2:
 
     # Opciones de mercado para la calculadora manual (se mantiene flexible para permitir 1X2 manualmente)
     tipo_mercado_options = ["2 Resultados (1/2)", "3 Resultados (1/X/2)"]
-    # Establece el valor por defecto basado en el evento cargado o H2H si no hay carga
-    default_market_idx = 0 if st.session_state.calc_event_data['Mercado'] == "Ganador (Moneyline/H2H)" or "Totales" in st.session_state.calc_event_data['Mercado'] or "Spreads" in st.session_state.calc_event_data['Mercado'] else 1
+    
+    # Determinar el índice por defecto para el tipo de mercado en la calculadora
+    default_market_idx = 0 
+    # Si el mercado cargado desde el buscador es H2H, Totals o Spreads, por defecto es 2 resultados
+    if st.session_state.calc_event_data['Mercado'] == "Ganador (Moneyline/H2H)" or \
+       "Totales" in st.session_state.calc_event_data['Mercado'] or \
+       "Spreads" in st.session_state.calc_event_data['Mercado']:
+        default_market_idx = 0
+    # Si la cuota de empate cargada del buscador es diferente a 1.01, asumimos 3 resultados
+    elif st.session_state.calc_event_data['Cuota Empate'] != 1.01:
+        default_market_idx = 1
+
     tipo_mercado = st.radio("Tipo de mercado", tipo_mercado_options, index=default_market_idx, key="manual_tipo_mercado")
 
     st.subheader("🏠 Ingresar cuotas por casa de apuestas")
@@ -652,8 +662,17 @@ with tab2:
         st.session_state.cuotas_local_manual = [1.01] * 6
         st.session_state.cuotas_empate_manual = [1.01] * 6
         st.session_state.cuotas_visitante_manual = [1.01] * 6
-    st.session_state.last_moneda_manual = moneda
-
+        st.session_state.last_moneda_manual = moneda # Actualizar la última moneda seleccionada
+        st.rerun() # Reejecutar para que los campos de cuotas se reseteen con los nuevos valores por defecto
+    
+    # Si el tipo de mercado cambia de 3 a 2 resultados, resetear las cuotas de empate
+    if tipo_mercado == "2 Resultados (1/2)":
+        for i in range(6):
+            if st.session_state.cuotas_empate_manual[i] != 1.01:
+                st.session_state.cuotas_empate_manual = [1.01] * 6
+                st.session_state.nombres_casas_manual[2] = "N/A"
+                st.rerun() # Reejecutar para que los campos de cuotas de empate se reseteen visualmente
+                break # Solo necesitamos resetear una vez si detectamos un cambio
 
     casas_manual_input = []
     for i in range(num_casas):
@@ -669,22 +688,22 @@ with tab2:
             nombre = st.text_input(f"Nombre", value=nombre_casa_default, key=f"manual_nombre_{i}")
             st.session_state.nombres_casas_manual[i] = nombre
         with col2:
-            cuota_local = st.number_input(f"Cuota Local / Jugador 1", min_value=1.01, value=cuota_local_default, step=0.01, key=f"manual_local_{i}")
+            cuota_local = st.number_input(f"Cuota Local / Jugador 1", min_value=1.01, value=cuota_local_default, step=0.01, format="%.2f", key=f"manual_local_{i}")
             st.session_state.cuotas_local_manual[i] = cuota_local
         
         cuota_empate = 1.01 # Valor por defecto si no se muestra el campo
         if tipo_mercado == "3 Resultados (1/X/2)":
             with col3:
-                cuota_empate = st.number_input(f"Cuota Empate", min_value=1.01, value=cuota_empate_default, step=0.01, key=f"manual_empate_{i}")
+                cuota_empate = st.number_input(f"Cuota Empate", min_value=1.01, value=cuota_empate_default, step=0.01, format="%.2f", key=f"manual_empate_{i}")
                 st.session_state.cuotas_empate_manual[i] = cuota_empate
         else: 
-             # Si se cambia a 2 resultados, asegúrate de que la cuota de empate esté en su valor neutro
+             # Si se cambia a 2 resultados, asegúrate de que la cuota de empate esté en su valor neutro en la sesión
              if st.session_state.cuotas_empate_manual[i] != 1.01: 
                  st.session_state.cuotas_empate_manual[i] = 1.01
 
 
         with col4:
-            cuota_visitante = st.number_input(f"Cuota Visitante / Jugador 2", min_value=1.01, value=cuota_visitante_default, step=0.01, key=f"manual_visitante_{i}")
+            cuota_visitante = st.number_input(f"Cuota Visitante / Jugador 2", min_value=1.01, value=cuota_visitante_default, step=0.01, format="%.2f", key=f"manual_visitante_{i}")
             st.session_state.cuotas_visitante_manual[i] = cuota_visitante
         
         casas_manual_input.append((nombre, cuota_local, cuota_empate, cuota_visitante))
@@ -696,78 +715,94 @@ with tab2:
         mejores = []
 
         if tipo_mercado == "2 Resultados (1/2)":
-            # Para 2 resultados (H2H), necesitamos seleccionar la mejor cuota para cada lado
-            # de casas potencialmente diferentes. Se prueban todas las combinaciones de 2 casas.
+            # Para 2 resultados, necesitamos seleccionar la mejor cuota para cada lado
+            # Se prueban todas las combinaciones de 2 casas, extrayendo la mejor cuota para cada lado.
+            
+            # Encontrar la mejor cuota para el "local" entre todas las casas
+            best_cuota_local = 1.01
+            best_casa_local = "N/A"
             for i in range(num_casas):
-                for j in range(num_casas):
-                    if i == j: # Las cuotas para la surebet deben venir de casas distintas para H2H
-                        continue
-                    
-                    nombre1, c1_local, _, _ = casas_manual_input[i]
-                    nombre2, _, _, c2_visit = casas_manual_input[j]
+                if casas_manual_input[i][1] > best_cuota_local:
+                    best_cuota_local = casas_manual_input[i][1]
+                    best_casa_local = casas_manual_input[i][0]
 
-                    # Calcula la surebet con la cuota de Local de la casa i y la de Visitante de la casa j
-                    stake1, stake2, ganancia, roi, c_l, c_v = calcular_surebet_2_resultados(c1_local, c2_visit, presupuesto)
-                    if ganancia is not None: # Si se encontró una surebet rentable
-                        mejores.append({
-                            "tipo": "2 Resultados",
-                            "apuesta1_casa": nombre1,
-                            "apuesta1_rol": st.session_state.calc_event_data['Selección 1'],
-                            "apuesta1_cuota": c_l,
-                            "apuesta1_stake": stake1,
-                            "apuesta2_casa": nombre2,
-                            "apuesta2_rol": st.session_state.calc_event_data['Selección 2'],
-                            "apuesta2_cuota": c_v,
-                            "apuesta2_stake": stake2,
-                            "ganancia": ganancia,
-                            "roi": roi
-                        })
+            # Encontrar la mejor cuota para el "visitante" entre todas las casas
+            best_cuota_visitante = 1.01
+            best_casa_visitante = "N/A"
+            for i in range(num_casas):
+                if casas_manual_input[i][3] > best_cuota_visitante:
+                    best_cuota_visitante = casas_manual_input[i][3]
+                    best_casa_visitante = casas_manual_input[i][0]
+
+            if best_casa_local == best_casa_visitante: # Si las mejores cuotas vienen de la misma casa, no es una surebet real (para H2H)
+                st.warning("⚠️ Para una surebet de 2 resultados (H2H), las mejores cuotas deben provenir de **casas de apuestas diferentes** para cada resultado.")
+            else:
+                stake1, stake2, ganancia, roi, c_l, c_v = calcular_surebet_2_resultados(best_cuota_local, best_cuota_visitante, presupuesto)
+                if ganancia is not None: # Si se encontró una surebet rentable
+                    mejores.append({
+                        "tipo": "2 Resultados",
+                        "apuesta1_casa": best_casa_local,
+                        "apuesta1_rol": st.session_state.calc_event_data['Selección 1'],
+                        "apuesta1_cuota": c_l,
+                        "apuesta1_stake": stake1,
+                        "apuesta2_casa": best_casa_visitante,
+                        "apuesta2_rol": st.session_state.calc_event_data['Selección 2'],
+                        "apuesta2_cuota": c_v,
+                        "apuesta2_stake": stake2,
+                        "ganancia": ganancia,
+                        "roi": roi
+                    })
                     
         else: # 3 Resultados (1/X/2)
-            # Para 3 resultados (1X2), se seleccionan las mejores cuotas para Local, Empate y Visitante.
-            # Se prueban todas las combinaciones posibles de 3 casas.
-            # Se utiliza `combinations` para obtener grupos únicos de índices de casas.
-            # Luego, se asigna cada índice a un rol (Local, Empate, Visitante).
-            # Para simplificar la lógica y evitar la explosión combinatoria de 3 ciclos anidados,
-            # podríamos buscar directamente las 3 mejores cuotas (una por resultado) entre todas las casas.
-            # Sin embargo, el enfoque actual de 3 loops asegura que cada combinación posible de casas sea evaluada
-            # lo cual es más exhaustivo, aunque potencialmente más lento con muchas casas.
-            for i_l in range(num_casas):
-                for i_x in range(num_casas):
-                    for i_v in range(num_casas):
-                        # Las casas para 1, X y 2 pueden ser la misma o diferentes
-                        # Depende de dónde se encuentre la mejor cuota para cada resultado
-                        nombre_l, c_l, _, _ = casas_manual_input[i_l]
-                        nombre_x, _, c_x, _ = casas_manual_input[i_x]
-                        nombre_v, _, _, c_v = casas_manual_input[i_v]
-                        
-                        stake_l, stake_x, stake_v, ganancia, roi, cuota_l, cuota_x, cuota_v = \
-                            calcular_surebet_3_resultados(c_l, c_x, c_v, presupuesto)
+            # Para 3 resultados (1X2), se seleccionan las mejores cuotas para Local, Empate y Visitante
+            # entre todas las casas introducidas.
+            best_cuota_local = 1.01
+            best_casa_local = "N/A"
+            best_cuota_empate = 1.01
+            best_casa_empate = "N/A"
+            best_cuota_visitante = 1.01
+            best_casa_visitante = "N/A"
 
-                        if ganancia is not None:
-                            mejores.append({
-                                "tipo": "3 Resultados",
-                                "apuesta1_casa": nombre_l,
-                                "apuesta1_rol": st.session_state.calc_event_data['Selección 1'],
-                                "apuesta1_cuota": cuota_l,
-                                "apuesta1_stake": stake_l,
-                                "apuesta2_casa": nombre_x,
-                                "apuesta2_rol": "Empate",
-                                "apuesta2_cuota": cuota_x,
-                                "apuesta2_stake": stake_x,
-                                "apuesta3_casa": nombre_v,
-                                "apuesta3_rol": st.session_state.calc_event_data['Selección 2'],
-                                "apuesta3_cuota": cuota_v,
-                                "apuesta3_stake": stake_v,
-                                "ganancia": ganancia,
-                                "roi": roi
-                            })
+            for i in range(num_casas):
+                nombre, c_l, c_x, c_v = casas_manual_input[i]
+                if c_l > best_cuota_local:
+                    best_cuota_local = c_l
+                    best_casa_local = nombre
+                if c_x > best_cuota_empate:
+                    best_cuota_empate = c_x
+                    best_casa_empate = nombre
+                if c_v > best_cuota_visitante:
+                    best_cuota_visitante = c_v
+                    best_casa_visitante = nombre
+            
+            # Se permite que las casas sean las mismas si ofrecen las mejores cuotas para diferentes resultados
+            stake_l, stake_x, stake_v, ganancia, roi, cuota_l, cuota_x, cuota_v = \
+                calcular_surebet_3_resultados(best_cuota_local, best_cuota_empate, best_cuota_visitante, presupuesto)
+
+            if ganancia is not None:
+                mejores.append({
+                    "tipo": "3 Resultados",
+                    "apuesta1_casa": best_casa_local,
+                    "apuesta1_rol": st.session_state.calc_event_data['Selección 1'],
+                    "apuesta1_cuota": cuota_l,
+                    "apuesta1_stake": stake_l,
+                    "apuesta2_casa": best_casa_empate,
+                    "apuesta2_rol": "Empate",
+                    "apuesta2_cuota": cuota_x,
+                    "apuesta2_stake": stake_x,
+                    "apuesta3_casa": best_casa_visitante,
+                    "apuesta3_rol": st.session_state.calc_event_data['Selección 2'],
+                    "apuesta3_cuota": cuota_v,
+                    "apuesta3_stake": stake_v,
+                    "ganancia": ganancia,
+                    "roi": roi
+                })
 
         # --- Mostrar el Mejor Resultado Encontrado Manualmente ---
         if mejores:
             st.success("✅ ¡Surebet encontrada manualmente!")
             
-            # Ordenar por ROI para encontrar la mejor surebet
+            # Ordenar por ROI para encontrar la mejor surebet (si hubiera múltiples por alguna razón, ej. por diferentes combinaciones de casas)
             top_surebet = sorted(mejores, key=lambda x: x["roi"], reverse=True)[0]
 
             st.markdown("---")
@@ -783,22 +818,22 @@ with tab2:
             if top_surebet['tipo'] == "2 Resultados":
                 st.markdown(f"""
 - **{top_surebet['apuesta1_casa']}** (para **{top_surebet['apuesta1_rol']}**):
-  - Cuota: {top_surebet['apuesta1_cuota']}
+  - Cuota: {top_surebet['apuesta1_cuota']:.2f}
   - **Apostar: ${top_surebet['apuesta1_stake']:,d} {moneda}**
 - **{top_surebet['apuesta2_casa']}** (para **{top_surebet['apuesta2_rol']}**):
-  - Cuota: {top_surebet['apuesta2_cuota']}
+  - Cuota: {top_surebet['apuesta2_cuota']:.2f}
   - **Apostar: ${top_surebet['apuesta2_stake']:,d} {moneda}**
 """)
             elif top_surebet['tipo'] == "3 Resultados":
                 st.markdown(f"""
 - **{top_surebet['apuesta1_casa']}** (para **{top_surebet['apuesta1_rol']}**):
-  - Cuota: {top_surebet['apuesta1_cuota']}
+  - Cuota: {top_surebet['apuesta1_cuota']:.2f}
   - **Apostar: ${top_surebet['apuesta1_stake']:,d} {moneda}**
 - **{top_surebet['apuesta2_casa']}** (para **{top_surebet['apuesta2_rol']}**):
-  - Cuota: {top_surebet['apuesta2_cuota']}
+  - Cuota: {top_surebet['apuesta2_cuota']:.2f}
   - **Apostar: ${top_surebet['apuesta2_stake']:,d} {moneda}**
-- **{top_surebet['apuesta3_casa']}** (para **{top_surebet['apputa3_rol']}**):
-  - Cuota: {top_surebet['apuesta3_cuota']}
+- **{top_surebet['apuesta3_casa']}** (para **{top_surebet['apuesta3_rol']}**):
+  - Cuota: {top_surebet['apuesta3_cuota']:.2f}
   - **Apostar: ${top_surebet['apuesta3_stake']:,d} {moneda}**
 """)
             
