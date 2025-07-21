@@ -3,7 +3,7 @@ import pandas as pd
 import requests
 from datetime import datetime, timedelta, timezone
 import time
-import concurrent.futures # Importación necesaria para la paralelización
+import concurrent.futures
 
 # --- Configuración de la Página y Título ---
 st.set_page_config(
@@ -29,7 +29,7 @@ API_KEYS = [
     "9091ec0ea25e0cdfc161b91603e31a9a", "c0f7d526dd778654dfee7c0686124a77",
     "61a015bc1506aac11ec62901a6189dc6", "d585a73190a117c1041ccc778b92b23d9",
     "4056628d07b0b900175cb332c191cda0", "ac4d3eb2d6df42030568eadeee906770",
-    "3cebba62ff5330d1a409160e6870bfd6", "358644d442444f95bd0b0278e4d3ea22",
+    "3cebba62ff5330d1a409160e686124a77", "358644d442444f95bd0b0278e4d3ea22",
     "45dff0519cde0396df06fc4bc1f9bce1", "a4f585765036f57be0966b39125f87a0",
     "349f8eff303fa0963424c54ba181535b", "f54405559ba5aaa27a9687992a84ae2f",
     "24772de60f0ebe37a554b179e0dd819f", "b7bdefecc83235f7923868a0f2e3e114",
@@ -133,25 +133,25 @@ def get_next_available_api_key_info():
 
     return None, None # No hay keys disponibles
 
-def get_event_status(commence_time_str):
+def get_event_status(commence_time_str, min_hours_ahead, max_hours_ahead):
     """
-    Clasifica un evento como 'En Vivo' (si ya empezó) o 'Pre-Partido' (en las próximas 48h).
-    Ignora eventos que están muy lejos en el futuro.
+    Clasifica un evento como 'Pre-Partido' si está dentro del rango de horas especificado
+    (mínimo y máximo antes del inicio). Excluye eventos 'En Vivo'.
     """
     # Manejar el formato Z para que datetime.fromisoformat funcione correctamente
     commence_time = datetime.fromisoformat(commence_time_str.replace('Z', '+00:00'))
     now_utc = datetime.now(timezone.utc)
     
-    if commence_time < now_utc:
-        return "🔴 En Vivo"
-    elif commence_time < now_utc + timedelta(hours=48): # Considerar pre-partido hasta 48h antes
+    if commence_time <= now_utc: # Excluir eventos que ya han comenzado (En Vivo)
+        return None
+    elif now_utc + timedelta(hours=min_hours_ahead) <= commence_time <= now_utc + timedelta(hours=max_hours_ahead):
         return "🟢 Pre-Partido"
     else:
-        return None # Eventos muy lejanos no son relevantes para surebets inmediatas
+        return None # Eventos fuera del rango de antelación no son relevantes
 
-def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx):
+def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx, min_hours_ahead, max_hours_ahead):
     """
-    Busca surebets para un deporte y mercado específicos.
+    Busca surebets para un deporte y mercado específicos, filtrando por rango de antelación.
     Esta función se ejecutará en un hilo secundario.
     Devuelve las surebets encontradas y el estado de la API key utilizada.
     NO DEBE ACCEDER DIRECTAMENTE A st.session_state.
@@ -191,7 +191,7 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx):
             return surebets_found, api_key_depleted, error_message, None, None
         
         if response.status_code == 422: # Unprocessable Entity - Parámetros inválidos
-            error_message = f"Parámetros de solicitud inválidos para '{sport_key}'."
+            error_message = f"Parámetros de solicitud inválidos para '{sport_key}'. Verifica que la combinación deporte/mercado sea válida."
             return surebets_found, api_key_depleted, error_message, None, None
         
         if response.status_code >= 500: # Server Error
@@ -207,9 +207,10 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx):
 
         # --- Lógica Principal de Búsqueda de Surebets por Mercado ---
         for event in data:
-            status = get_event_status(event['commence_time'])
+            # Filtrar eventos por el estado de pre-partido y el rango de antelación
+            status = get_event_status(event['commence_time'], min_hours_ahead, max_hours_ahead)
             if not status:
-                continue # Saltar eventos no relevantes (muy lejanos en el futuro)
+                continue # Saltar eventos no relevantes (En Vivo o fuera de rango)
 
             home_team = event['home_team']
             away_team = event['away_team']
@@ -342,7 +343,7 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx):
 
                         # La API devuelve el hándicap para el equipo.
                         # Necesitamos encontrar la cuota opuesta para el mismo 'point'.
-                        # Por ejemplo, si un equipo tiene +1.5, el otro tendrá -1.5.
+                        # Por ejemplo, si es -1.5 para el local, es +1.5 para el visitante.
                         # O si un equipo tiene -7.5, el otro tendrá +7.5.
                         # La clave para la surebet está en el 'point' y el 'name' (equipo).
 
@@ -484,6 +485,22 @@ with tab1:
     )
     selected_market_key = MARKETS[selected_market_name]
 
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Filtro de Tiempo de Eventos (Pre-Partido)")
+    min_hours_ahead = st.sidebar.radio(
+        "Mostrar eventos con al menos esta antelación:",
+        options=[6, 12],
+        index=0, # Por defecto 6 horas
+        format_func=lambda x: f"{x} horas"
+    )
+    max_hours_ahead = st.sidebar.slider(
+        "Mostrar eventos con un máximo de antelación (horas):",
+        min_value=24,
+        max_value=72,
+        value=72,
+        step=12
+    )
+
 
     if st.sidebar.button("🚀 Iniciar Búsqueda de Surebets"):
         if not selected_sports:
@@ -508,7 +525,7 @@ with tab1:
                         break # Salir del bucle si no hay más keys activas
                     
                     # Enviar la tarea al executor. La función find_surebets_task recibe la key y su índice.
-                    futures[executor.submit(find_surebets_task, sport_name, SPORTS[sport_name], selected_market_key, api_key, api_key_idx)] = (sport_name, api_key, api_key_idx)
+                    futures[executor.submit(find_surebets_task, sport_name, SPORTS[sport_name], selected_market_key, api_key, api_key_idx, min_hours_ahead, max_hours_ahead)] = (sport_name, api_key, api_key_idx)
                 
                 # PROCESAR RESULTADOS: A medida que los futuros se completan, manejar los resultados en el hilo principal
                 for future in concurrent.futures.as_completed(futures):
@@ -553,7 +570,7 @@ with tab1:
                     if any(not status for status in st.session_state.api_key_status.values()):
                          st.warning("No se encontraron surebets. Es posible que algunas API Keys hayan agotado sus créditos o no haya surebets disponibles para los deportes y mercado seleccionados.")
                     else:
-                        st.warning(f"No se encontraron surebets para los deportes y mercado '{selected_market_name}' seleccionados.")
+                        st.warning(f"No se encontraron surebets para los deportes y mercado '{selected_market_name}' seleccionados, en el rango de {min_hours_ahead} a {max_hours_ahead} horas de antelación.")
                 else:
                     st.success(f"¡Se encontraron **{len(all_surebets)}** oportunidades de surebet!")
                     
@@ -622,7 +639,7 @@ with tab2:
     # Opciones de mercado para la calculadora manual (se mantiene flexible para permitir 1X2 manualmente)
     tipo_mercado_options = ["2 Resultados (1/2)", "3 Resultados (1/X/2)"]
     # Establece el valor por defecto basado en el evento cargado o H2H si no hay carga
-    default_market_idx = 0 if st.session_state.calc_event_data['Mercado'] == "Ganador (Moneyline/H2H)" else 1
+    default_market_idx = 0 if st.session_state.calc_event_data['Mercado'] == "Ganador (Moneyline/H2H)" or "Totales" in st.session_state.calc_event_data['Mercado'] or "Spreads" in st.session_state.calc_event_data['Mercado'] else 1
     tipo_mercado = st.radio("Tipo de mercado", tipo_mercado_options, index=default_market_idx, key="manual_tipo_mercado")
 
     st.subheader("🏠 Ingresar cuotas por casa de apuestas")
@@ -780,7 +797,7 @@ with tab2:
 - **{top_surebet['apuesta2_casa']}** (para **{top_surebet['apuesta2_rol']}**):
   - Cuota: {top_surebet['apuesta2_cuota']}
   - **Apostar: ${top_surebet['apuesta2_stake']:,d} {moneda}**
-- **{top_surebet['apuesta3_casa']}** (para **{top_surebet['apuesta3_rol']}**):
+- **{top_surebet['apuesta3_casa']}** (para **{top_surebet['apputa3_rol']}**):
   - Cuota: {top_surebet['apuesta3_cuota']}
   - **Apostar: ${top_surebet['apuesta3_stake']:,d} {moneda}**
 """)
