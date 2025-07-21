@@ -14,7 +14,7 @@ st.set_page_config(
 
 st.title("⚽ Buscador y Calculadora de Surebets")
 st.markdown("""
-Esta aplicación **detecta oportunidades de surebets (arbitraje deportivo)** en tiempo real exclusivamente para el **mercado Ganador (Moneyline/H2H)** y te permite **calcularlas** de forma sencilla.
+Esta aplicación **detecta oportunidades de surebets (arbitraje deportivo)** en tiempo real para **varios mercados** y te permite **calcularlas** de forma sencilla.
 """)
 
 # --- Lista de API Keys (incluyendo las 50 proporcionadas) ---
@@ -27,7 +27,7 @@ API_KEYS = [
     "fbd5dece2a99c992cfd783aedfcd2ef3", "687ba857bcae9c7f33545dcbe59aeb2b",
     "f9ff83040b9d2afc1862094694f53da2", "f730fa9137a7cd927554df334af916dc",
     "9091ec0ea25e0cdfc161b91603e31a9a", "c0f7d526dd778654dfee7c0686124a77",
-    "61a015bc1506aac11ec62901a6189dc6", "d585a73190a117c1041ccc78b92b23d9",
+    "61a015bc1506aac11ec62901a6189dc6", "d585a73190a117c1041ccc778b92b23d9",
     "4056628d07b0b900175cb332c191cda0", "ac4d3eb2d6df42030568eadeee906770",
     "3cebba62ff5330d1a409160e6870bfd6", "358644d442444f95bd0b0278e4d3ea22",
     "45dff0519cde0396df06fc4bc1f9bce1", "a4f585765036f57be0966b39125f87a0",
@@ -56,9 +56,11 @@ SPORTS = {
     "Béisbol": "baseball_mlb",
 }
 
-# --- Diccionario de Mercados Disponibles (Solo H2H) ---
+# --- Diccionario de Mercados Disponibles (Ampliados) ---
 MARKETS = {
     "Ganador (Moneyline/H2H)": "h2h",
+    "Totales (Over/Under)": "totals",
+    "Spreads (Hándicap)": "spreads",
 }
 
 # --- Inicialización del Estado de Sesión de Streamlit ---
@@ -149,7 +151,7 @@ def get_event_status(commence_time_str):
 
 def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx):
     """
-    Busca surebets para un deporte y mercado específicos (solo H2H).
+    Busca surebets para un deporte y mercado específicos.
     Esta función se ejecutará en un hilo secundario.
     Devuelve las surebets encontradas y el estado de la API key utilizada.
     NO DEBE ACCEDER DIRECTAMENTE A st.session_state.
@@ -203,7 +205,7 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx):
         remaining_requests = response.headers.get('x-requests-remaining', 'N/A')
         used_requests = response.headers.get('x-requests-used', 'N/A')
 
-        # --- Lógica Principal de Búsqueda de Surebets ---
+        # --- Lógica Principal de Búsqueda de Surebets por Mercado ---
         for event in data:
             status = get_event_status(event['commence_time'])
             if not status:
@@ -212,70 +214,192 @@ def find_surebets_task(sport_name, sport_key, market_key, api_key, api_key_idx):
             home_team = event['home_team']
             away_team = event['away_team']
             
-            best_odds = {
-                home_team: {'price': 0, 'bookmaker': ''}, 
-                away_team: {'price': 0, 'bookmaker': ''}
-            }
-            # Un conjunto de nombres de equipos para una verificación rápida
-            team_names = {home_team, away_team}
+            # Lógica para H2H (Moneyline)
+            if market_key == "h2h":
+                best_odds = {
+                    home_team: {'price': 0, 'bookmaker': ''}, 
+                    away_team: {'price': 0, 'bookmaker': ''}
+                }
+                team_names = {home_team, away_team}
 
-            for bookmaker in event['bookmakers']:
-                # Asegurarse de que el bookmaker tenga el mercado H2H
-                h2h_market = next((m for m in bookmaker['markets'] if m['key'] == market_key), None)
-                if not h2h_market:
-                    continue # Saltar si la casa de apuestas no tiene el mercado H2H para este evento
+                for bookmaker in event['bookmakers']:
+                    h2h_market = next((m for m in bookmaker['markets'] if m['key'] == market_key), None)
+                    if not h2h_market:
+                        continue
 
-                # Recopilar las cuotas de esta casa para los resultados esperados
-                current_bookmaker_outcomes = {}
-                for outcome in h2h_market['outcomes']:
-                    outcome_name = outcome['name']
-                    price = outcome['price']
+                    current_bookmaker_outcomes = {}
+                    for outcome in h2h_market['outcomes']:
+                        outcome_name = outcome['name']
+                        price = outcome['price']
+                        if outcome_name in team_names:
+                            current_bookmaker_outcomes[outcome_name] = price
                     
-                    if outcome_name in team_names:
-                        current_bookmaker_outcomes[outcome_name] = price
+                    if home_team in current_bookmaker_outcomes and away_team in current_bookmaker_outcomes:
+                        if current_bookmaker_outcomes[home_team] > best_odds[home_team]['price']:
+                            best_odds[home_team]['price'] = current_bookmaker_outcomes[home_team]
+                            best_odds[home_team]['bookmaker'] = bookmaker['title']
+                        
+                        if current_bookmaker_outcomes[away_team] > best_odds[away_team]['price']:
+                            best_odds[away_team]['price'] = current_bookmaker_outcomes[away_team]
+                            best_odds[away_team]['bookmaker'] = bookmaker['title']
                 
-                # CRÍTICO: Asegurarse de que la casa de apuestas ofrezca cuotas para AMBOS lados del H2H
-                if home_team in current_bookmaker_outcomes and away_team in current_bookmaker_outcomes:
-                    # Si esta casa tiene cuotas para ambos, verificar si son las mejores hasta ahora
-                    if current_bookmaker_outcomes[home_team] > best_odds[home_team]['price']:
-                        best_odds[home_team]['price'] = current_bookmaker_outcomes[home_team]
-                        best_odds[home_team]['bookmaker'] = bookmaker['title']
+                odds1 = best_odds[home_team]['price']
+                odds2 = best_odds[away_team]['price']
+
+                if odds1 > 0 and odds2 > 0:
+                    utilidad = (1 - (1/odds1 + 1/odds2)) * 100
+                else:
+                    continue
+
+                if utilidad > 0.01: 
+                    surebets_found.append({
+                        "Deporte": sport_name,
+                        "Liga/Torneo": event['sport_title'],
+                        "Estado": status,
+                        "Evento": f"{home_team} vs {away_team}",
+                        "Fecha (UTC)": datetime.fromisoformat(event['commence_time'].replace('Z', '')).strftime('%Y-%m-%d %H:%M'),
+                        "Mercado": "Ganador (Moneyline/H2H)",
+                        "Utilidad (%)": f"{utilidad:.2f}%",
+                        "Selección 1": home_team,
+                        "Mejor Cuota 1": odds1,
+                        "Casa de Apuestas 1": best_odds[home_team]['bookmaker'],
+                        "Selección X": "N/A", 
+                        "Mejor Cuota X": 1.01, 
+                        "Casa de Apuestas X": "N/A",
+                        "Selección 2": away_team,
+                        "Mejor Cuota 2": odds2,
+                        "Casa de Apuestas 2": best_odds[away_team]['bookmaker'],
+                    })
+
+            # Lógica para Totales (Over/Under)
+            elif market_key == "totals":
+                # Agrupar cuotas por 'point' (línea de total)
+                best_totals_odds = {} # {point: {'over': {'price': X, 'bookmaker': Y}, 'under': {'price': A, 'bookmaker': B}}}
+
+                for bookmaker in event['bookmakers']:
+                    totals_market = next((m for m in bookmaker['markets'] if m['key'] == market_key), None)
+                    if not totals_market:
+                        continue
                     
-                    if current_bookmaker_outcomes[away_team] > best_odds[away_team]['price']:
-                        best_odds[away_team]['price'] = current_bookmaker_outcomes[away_team]
-                        best_odds[away_team]['bookmaker'] = bookmaker['title']
-            
-            # --- Cálculo de la Utilidad de la Surebet (solo con las mejores cuotas) ---
-            odds1 = best_odds[home_team]['price']
-            odds2 = best_odds[away_team]['price']
+                    for outcome in totals_market['outcomes']:
+                        point = outcome['point']
+                        name = outcome['name'] # 'Over' or 'Under'
+                        price = outcome['price']
 
-            # Solo proceder si tenemos cuotas válidas y mayores a 0 para ambos resultados
-            if odds1 > 0 and odds2 > 0:
-                utilidad = (1 - (1/odds1 + 1/odds2)) * 100
-            else:
-                continue # Saltar si no se pudieron obtener cuotas válidas para ambos lados H2H
+                        if point not in best_totals_odds:
+                            best_totals_odds[point] = {'over': {'price': 0, 'bookmaker': ''}, 'under': {'price': 0, 'bookmaker': ''}}
+                        
+                        if name.lower() == 'over' and price > best_totals_odds[point]['over']['price']:
+                            best_totals_odds[point]['over']['price'] = price
+                            best_totals_odds[point]['over']['bookmaker'] = bookmaker['title']
+                        elif name.lower() == 'under' and price > best_totals_odds[point]['under']['price']:
+                            best_totals_odds[point]['under']['price'] = price
+                            best_totals_odds[point]['under']['bookmaker'] = bookmaker['title']
+                
+                for point, odds_data in best_totals_odds.items():
+                    over_odds = odds_data['over']['price']
+                    under_odds = odds_data['under']['price']
 
-            # --- Filtrado de Surebets: Solo incluir oportunidades rentables ---
-            # Una utilidad > 0.01% asegura una ganancia real después de las apuestas.
-            if utilidad > 0.01: 
-                surebets_found.append({
-                    "Deporte": sport_name,
-                    "Liga/Torneo": event['sport_title'],
-                    "Estado": status,
-                    "Evento": f"{home_team} vs {away_team}",
-                    "Fecha (UTC)": datetime.fromisoformat(event['commence_time'].replace('Z', '')).strftime('%Y-%m-%d %H:%M'),
-                    "Mercado": "Ganador (Moneyline/H2H)",
-                    "Utilidad (%)": f"{utilidad:.2f}%",
-                    "Selección 1": home_team,
-                    "Mejor Cuota 1": odds1,
-                    "Casa de Apuestas 1": best_odds[home_team]['bookmaker'],
-                    "Selección X": "N/A", # No aplica para H2H
-                    "Mejor Cuota X": 1.01, # Valor por defecto para la calculadora si cambia de mercado
-                    "Casa de Apuestas X": "N/A",
-                    "Selección 2": away_team,
-                    "Mejor Cuota 2": odds2,
-                    "Casa de Apuestas 2": best_odds[away_team]['bookmaker'],
-                })
+                    if over_odds > 0 and under_odds > 0:
+                        utilidad = (1 - (1/over_odds + 1/under_odds)) * 100
+                    else:
+                        continue
+
+                    if utilidad > 0.01:
+                        surebets_found.append({
+                            "Deporte": sport_name,
+                            "Liga/Torneo": event['sport_title'],
+                            "Estado": status,
+                            "Evento": f"{home_team} vs {away_team} (Total: {point})",
+                            "Fecha (UTC)": datetime.fromisoformat(event['commence_time'].replace('Z', '')).strftime('%Y-%m-%d %H:%M'),
+                            "Mercado": f"Totales (Over/Under {point})",
+                            "Utilidad (%)": f"{utilidad:.2f}%",
+                            "Selección 1": f"Over {point}",
+                            "Mejor Cuota 1": over_odds,
+                            "Casa de Apuestas 1": odds_data['over']['bookmaker'],
+                            "Selección X": "N/A", 
+                            "Mejor Cuota X": 1.01, 
+                            "Casa de Apuestas X": "N/A",
+                            "Selección 2": f"Under {point}",
+                            "Mejor Cuota 2": under_odds,
+                            "Casa de Apuestas 2": odds_data['under']['bookmaker'],
+                        })
+
+            # Lógica para Spreads (Hándicap)
+            elif market_key == "spreads":
+                # Agrupar cuotas por 'point' (línea de hándicap)
+                best_spreads_odds = {} # {point: {'home_team_spread': {'price': X, 'bookmaker': Y}, 'away_team_spread': {'price': A, 'bookmaker': B}}}
+
+                for bookmaker in event['bookmakers']:
+                    spreads_market = next((m for m in bookmaker['markets'] if m['key'] == market_key), None)
+                    if not spreads_market:
+                        continue
+                    
+                    for outcome in spreads_market['outcomes']:
+                        point = outcome['point']
+                        name = outcome['name'] # Nombre del equipo
+                        price = outcome['price']
+
+                        # La API devuelve el hándicap para el equipo.
+                        # Necesitamos encontrar la cuota opuesta para el mismo 'point'.
+                        # Por ejemplo, si un equipo tiene +1.5, el otro tendrá -1.5.
+                        # O si un equipo tiene -7.5, el otro tendrá +7.5.
+                        # La clave para la surebet está en el 'point' y el 'name' (equipo).
+
+                        # Normalizar el 'point' para que sea el mismo para ambos lados del spread
+                        # Por ejemplo, si es -1.5 para el local, es +1.5 para el visitante.
+                        # Usamos el valor absoluto del punto como clave para agrupar.
+                        normalized_point = abs(point)
+
+                        if normalized_point not in best_spreads_odds:
+                            best_spreads_odds[normalized_point] = {
+                                'home_spread': {'price': 0, 'bookmaker': '', 'point': None}, 
+                                'away_spread': {'price': 0, 'bookmaker': '', 'point': None}
+                            }
+                        
+                        if name == home_team:
+                            if price > best_spreads_odds[normalized_point]['home_spread']['price']:
+                                best_spreads_odds[normalized_point]['home_spread']['price'] = price
+                                best_spreads_odds[normalized_point]['home_spread']['bookmaker'] = bookmaker['title']
+                                best_spreads_odds[normalized_point]['home_spread']['point'] = point # Guardar el punto original
+                        elif name == away_team:
+                            if price > best_spreads_odds[normalized_point]['away_spread']['price']:
+                                best_spreads_odds[normalized_point]['away_spread']['price'] = price
+                                best_spreads_odds[normalized_point]['away_spread']['bookmaker'] = bookmaker['title']
+                                best_spreads_odds[normalized_point]['away_spread']['point'] = point # Guardar el punto original
+                
+                for normalized_point, odds_data in best_spreads_odds.items():
+                    home_spread_odds = odds_data['home_spread']['price']
+                    away_spread_odds = odds_data['away_spread']['price']
+                    home_point = odds_data['home_spread']['point']
+                    away_point = odds_data['away_spread']['point']
+
+                    # Asegurarse de que tenemos cuotas para ambos lados del spread y que los puntos son opuestos
+                    if home_spread_odds > 0 and away_spread_odds > 0 and home_point is not None and away_point is not None and home_point == -away_point:
+                        utilidad = (1 - (1/home_spread_odds + 1/away_spread_odds)) * 100
+                    else:
+                        continue
+
+                    if utilidad > 0.01:
+                        surebets_found.append({
+                            "Deporte": sport_name,
+                            "Liga/Torneo": event['sport_title'],
+                            "Estado": status,
+                            "Evento": f"{home_team} ({home_point}) vs {away_team} ({away_point})",
+                            "Fecha (UTC)": datetime.fromisoformat(event['commence_time'].replace('Z', '')).strftime('%Y-%m-%d %H:%M'),
+                            "Mercado": f"Spreads (Hándicap)",
+                            "Utilidad (%)": f"{utilidad:.2f}%",
+                            "Selección 1": f"{home_team} ({home_point})",
+                            "Mejor Cuota 1": home_spread_odds,
+                            "Casa de Apuestas 1": odds_data['home_spread']['bookmaker'],
+                            "Selección X": "N/A", 
+                            "Mejor Cuota X": 1.01, 
+                            "Casa de Apuestas X": "N/A",
+                            "Selección 2": f"{away_team} ({away_point})",
+                            "Mejor Cuota 2": away_spread_odds,
+                            "Casa de Apuestas 2": odds_data['away_spread']['bookmaker'],
+                        })
+
         # Devolver las surebets, si la key se agotó, el mensaje de error y la info de requests
         return surebets_found, api_key_depleted, error_message, remaining_requests, used_requests
 
@@ -335,31 +459,33 @@ casas_predefinidas_manual = {
 
 
 # --- Interfaz de Usuario con Streamlit (Tabs) ---
-tab1, tab2 = st.tabs(["🔎 Buscador de Surebets H2H", "🧮 Calculadora Manual"])
+tab1, tab2 = st.tabs(["🔎 Buscador de Surebets", "🧮 Calculadora Manual"])
 
-# --- TAB 1: Buscador de Surebets H2H ---
+# --- TAB 1: Buscador de Surebets ---
 with tab1:
-    st.header("🔎 Buscador de Surebets H2H (Ganador/Moneyline)")
+    st.header("🔎 Buscador de Surebets (Múltiples Mercados)")
     st.markdown("""
-    Aquí puedes buscar surebets en tiempo real exclusivamente para el **mercado de Ganador (sin empate)**
+    Aquí puedes buscar surebets en tiempo real para diferentes mercados
     entre una amplia gama de casas de apuestas y los deportes seleccionados.
     """)
 
     st.sidebar.header("Panel de Control del Buscador")
 
     selected_sports = st.sidebar.multiselect(
-        "Selecciona los deportes a escanear (solo H2H):",
+        "Selecciona los deportes a escanear:",
         options=list(SPORTS.keys()),
         default=["Fútbol", "Baloncesto", "Tenis", "Béisbol"] # Seleccionados por defecto
     )
 
-    # El mercado ahora es fijo en H2H para el buscador
-    selected_market_name = "Ganador (Moneyline/H2H)"
+    selected_market_name = st.sidebar.selectbox(
+        "Selecciona el mercado a escanear:",
+        options=list(MARKETS.keys()),
+        default="Ganador (Moneyline/H2H)"
+    )
     selected_market_key = MARKETS[selected_market_name]
-    st.sidebar.markdown(f"**Mercado seleccionado: {selected_market_name}**")
 
 
-    if st.sidebar.button("🚀 Iniciar Búsqueda de Surebets H2H"):
+    if st.sidebar.button("🚀 Iniciar Búsqueda de Surebets"):
         if not selected_sports:
             st.warning("Por favor, selecciona al menos un deporte para buscar.")
         else:
@@ -427,7 +553,7 @@ with tab1:
                     if any(not status for status in st.session_state.api_key_status.values()):
                          st.warning("No se encontraron surebets. Es posible que algunas API Keys hayan agotado sus créditos o no haya surebets disponibles para los deportes y mercado seleccionados.")
                     else:
-                        st.warning(f"No se encontraron surebets para los deportes seleccionados en el mercado '{selected_market_name}'.")
+                        st.warning(f"No se encontraron surebets para los deportes y mercado '{selected_market_name}' seleccionados.")
                 else:
                     st.success(f"¡Se encontraron **{len(all_surebets)}** oportunidades de surebet!")
                     
@@ -442,8 +568,12 @@ with tab1:
                         with col1:
                             st.markdown(f"**Evento:** {row['Evento']} | **Deporte:** {row['Deporte']} | **Liga:** {row['Liga/Torneo']} | **Fecha:** {row['Fecha (UTC)']}")
                             st.markdown(f"**Mercado:** {row['Mercado']} | **Utilidad:** **{row['Utilidad (%)']}**")
-                            # Formato específico para H2H
-                            st.markdown(f"**{row['Selección 1']}:** {row['Mejor Cuota 1']} ({row['Casa de Apuestas 1']}) | **{row['Selección 2']}:** {row['Mejor Cuota 2']} ({row['Casa de Apuestas 2']})")
+                            # Formato específico para H2H, Totales o Spreads
+                            if "Selección 2" in row and row["Selección 2"] != "N/A":
+                                st.markdown(f"**{row['Selección 1']}:** {row['Mejor Cuota 1']} ({row['Casa de Apuestas 1']}) | **{row['Selección 2']}:** {row['Mejor Cuota 2']} ({row['Casa de Apuestas 2']})")
+                            else: # En caso de que se necesite un formato más genérico si hay mercados con más de 2 selecciones
+                                st.markdown(f"**Cuota 1:** {row['Mejor Cuota 1']} ({row['Casa de Apuestas 1']})")
+                                # Puedes añadir más selecciones si los mercados lo requieren
                         with col2:
                             if st.button("Cargar en Calculadora", key=f"load_surebet_{i}"):
                                 # Cargar datos en el estado de sesión para la calculadora
@@ -452,12 +582,12 @@ with tab1:
                                     'Fecha (UTC)': row['Fecha (UTC)'],
                                     'Mercado': row['Mercado'], 
                                     'Cuota Local': row['Mejor Cuota 1'],
-                                    'Cuota Empate': 1.01, # Resetear para H2H cargado
+                                    'Cuota Empate': 1.01, # Resetear para H2H/Totales/Spreads cargado (si no aplica)
                                     'Cuota Visitante': row['Mejor Cuota 2'],
                                     'Selección 1': row['Selección 1'],
                                     'Selección 2': row['Selección 2'],
                                     'Casa Local': row['Casa de Apuestas 1'],
-                                    'Casa Empate': 'N/A', # Resetear para H2H cargado
+                                    'Casa Empate': 'N/A', # Resetear para H2H/Totales/Spreads cargado
                                     'Casa Visitante': row['Casa de Apuestas 2']
                                 }
                                 # Precargar la primera posición de la calculadora manual con los datos
@@ -465,7 +595,7 @@ with tab1:
                                 st.session_state.nombres_casas_manual[0] = row['Casa de Apuestas 1']
                                 st.session_state.cuotas_visitante_manual[0] = row['Mejor Cuota 2']
                                 st.session_state.nombres_casas_manual[1] = row['Casa de Apuestas 2'] 
-                                # Asegurar que los campos de empate se reseteen si se cambia a H2H
+                                # Asegurar que los campos de empate se reseteen si se cambia a H2H/Totales/Spreads
                                 st.session_state.cuotas_empate_manual[0] = 1.01
                                 st.session_state.nombres_casas_manual[2] = "N/A"
 
